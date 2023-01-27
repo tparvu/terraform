@@ -9,8 +9,6 @@ import (
 	ctyjson "github.com/zclconf/go-cty/cty/json"
 
 	"github.com/hashicorp/terraform/internal/addrs"
-	"github.com/hashicorp/terraform/internal/checks"
-	"github.com/hashicorp/terraform/internal/command/jsonchecks"
 	"github.com/hashicorp/terraform/internal/command/jsonconfig"
 	"github.com/hashicorp/terraform/internal/command/jsonstate"
 	"github.com/hashicorp/terraform/internal/configs"
@@ -42,7 +40,6 @@ type plan struct {
 	Config             json.RawMessage   `json:"configuration,omitempty"`
 	RelevantAttributes []resourceAttr    `json:"relevant_attributes,omitempty"`
 	Conditions         []conditionResult `json:"condition_results,omitempty"`
-	Checks             json.RawMessage   `json:"checks,omitempty"`
 }
 
 func newPlan() *plan {
@@ -109,7 +106,6 @@ type change struct {
 
 type output struct {
 	Sensitive bool            `json:"sensitive"`
-	Type      json.RawMessage `json:"type,omitempty"`
 	Value     json.RawMessage `json:"value,omitempty"`
 }
 
@@ -182,15 +178,10 @@ func Marshal(
 		return nil, fmt.Errorf("error in marshaling output changes: %s", err)
 	}
 
-	// output.Conditions (deprecated in favor of Checks, below)
-	err = output.marshalCheckResults(p.Checks)
+	// output.Conditions
+	err = output.marshalConditionResults(p.Conditions)
 	if err != nil {
-		return nil, fmt.Errorf("error in marshaling check results: %s", err)
-	}
-
-	// output.Checks
-	if p.Checks != nil && p.Checks.ConfigResults.Len() > 0 {
-		output.Checks = jsonchecks.MarshalCheckStates(p.Checks)
+		return nil, fmt.Errorf("error in marshaling condition results: %s", err)
 	}
 
 	// output.PriorState
@@ -413,12 +404,6 @@ func (p *plan) marshalResourceChanges(resources []*plans.ResourceInstanceChangeS
 			r.ActionReason = "delete_because_each_key"
 		case plans.ResourceInstanceDeleteBecauseNoModule:
 			r.ActionReason = "delete_because_no_module"
-		case plans.ResourceInstanceDeleteBecauseNoMoveTarget:
-			r.ActionReason = "delete_because_no_move_target"
-		case plans.ResourceInstanceReadBecauseConfigUnknown:
-			r.ActionReason = "read_because_config_unknown"
-		case plans.ResourceInstanceReadBecauseDependencyPending:
-			r.ActionReason = "read_because_dependency_pending"
 		default:
 			return nil, fmt.Errorf("resource %s has an unsupported action reason %s", r.Address, rc.ActionReason)
 		}
@@ -452,8 +437,7 @@ func (p *plan) marshalOutputChanges(changes *plans.Changes) error {
 		changeV.After, _ = changeV.After.UnmarkDeep()
 
 		var before, after []byte
-		var afterUnknown cty.Value
-
+		afterUnknown := cty.False
 		if changeV.Before != cty.NilVal {
 			before, err = ctyjson.Marshal(changeV.Before, changeV.Before.Type())
 			if err != nil {
@@ -466,18 +450,8 @@ func (p *plan) marshalOutputChanges(changes *plans.Changes) error {
 				if err != nil {
 					return err
 				}
-				afterUnknown = cty.False
 			} else {
-				filteredAfter := omitUnknowns(changeV.After)
-				if filteredAfter.IsNull() {
-					after = nil
-				} else {
-					after, err = ctyjson.Marshal(filteredAfter, filteredAfter.Type())
-					if err != nil {
-						return err
-					}
-				}
-				afterUnknown = unknownAsBool(changeV.After)
+				afterUnknown = cty.True
 			}
 		}
 
@@ -511,86 +485,23 @@ func (p *plan) marshalOutputChanges(changes *plans.Changes) error {
 	return nil
 }
 
-func (p *plan) marshalCheckResults(results *states.CheckResults) error {
-	if results == nil {
-		return nil
-	}
-
-	// For the moment this is still producing the flat structure from
-	// the initial release of preconditions/postconditions in Terraform v1.2.
-	// This therefore discards the aggregate information about any configuration
-	// objects that might end up with zero instances declared.
-	// We'll need to think about what we want to do here in order to expose
-	// the full check details while hopefully also remaining compatible with
-	// what we previously documented.
-
-	for _, configElem := range results.ConfigResults.Elems {
-		for _, objectElem := range configElem.Value.ObjectResults.Elems {
-			objectAddr := objectElem.Key
-			result := objectElem.Value
-
-			var boolResult, unknown bool
-			switch result.Status {
-			case checks.StatusPass:
-				boolResult = true
-			case checks.StatusFail:
-				boolResult = false
-			case checks.StatusError:
-				boolResult = false
-			case checks.StatusUnknown:
-				unknown = true
-			}
-
-			// We need to export one of the previously-documented condition
-			// types here even though we're no longer actually representing
-			// individual checks, so we'll fib a bit and just report a
-			// fixed string depending on the object type. Note that this
-			// means we'll report that a resource postcondition failed even
-			// if it was actually a precondition, which is non-ideal but
-			// hopefully we replace this with an object-first data structure
-			// in the near future.
-			fakeCheckType := "Condition"
-			switch objectAddr.(type) {
-			case addrs.AbsResourceInstance:
-				fakeCheckType = "ResourcePostcondition"
-			case addrs.AbsOutputValue:
-				fakeCheckType = "OutputPrecondition"
-			}
-
-			// NOTE: Our original design for this data structure exposed
-			// each declared check individually, but checks don't really
-			// have durable addresses between runs so we've now simplified
-			// the model to say that it's entire objects that pass or fail,
-			// via the combination of all of their checks.
-			//
-			// The public data structure for this was built around the
-			// original design and so we approximate that here by
-			// generating only a single "condition" per object in most cases,
-			// but will generate one for each error message if we're
-			// reporting a failure and we have at least one message.
-			if result.Status == checks.StatusFail && len(result.FailureMessages) != 0 {
-				for _, msg := range result.FailureMessages {
-					p.Conditions = append(p.Conditions, conditionResult{
-						Address:      objectAddr.String(),
-						Type:         fakeCheckType,
-						Result:       boolResult,
-						Unknown:      unknown,
-						ErrorMessage: msg,
-					})
-				}
-			} else {
-				p.Conditions = append(p.Conditions, conditionResult{
-					Address: objectAddr.String(),
-					Type:    fakeCheckType,
-					Result:  boolResult,
-					Unknown: unknown,
-				})
-			}
+func (p *plan) marshalConditionResults(conditions plans.Conditions) error {
+	for addr, c := range conditions {
+		cr := conditionResult{
+			checkAddress: addr,
+			Address:      c.Address.String(),
+			Type:         c.Type.String(),
+			ErrorMessage: c.ErrorMessage,
 		}
+		if c.Result.IsKnown() {
+			cr.Result = c.Result.True()
+		} else {
+			cr.Unknown = true
+		}
+		p.Conditions = append(p.Conditions, cr)
 	}
-
 	sort.Slice(p.Conditions, func(i, j int) bool {
-		return p.Conditions[i].Address < p.Conditions[j].Address
+		return p.Conditions[i].checkAddress < p.Conditions[j].checkAddress
 	})
 	return nil
 }
@@ -650,9 +561,8 @@ func omitUnknowns(val cty.Value) cty.Value {
 			newVal := omitUnknowns(v)
 			if newVal != cty.NilVal {
 				vals = append(vals, newVal)
-			} else if newVal == cty.NilVal {
-				// element order is how we correlate unknownness, so we must
-				// replace unknowns with nulls
+			} else if newVal == cty.NilVal && ty.IsListType() {
+				// list length may be significant, so we will turn unknowns into nulls
 				vals = append(vals, cty.NullVal(v.Type()))
 			}
 		}
@@ -781,7 +691,7 @@ func actionString(action string) []string {
 // encodePaths lossily encodes a cty.PathSet into an array of arrays of step
 // values, such as:
 //
-//	[["length"],["triggers",0,"value"]]
+//   [["length"],["triggers",0,"value"]]
 //
 // The lossiness is that we cannot distinguish between an IndexStep with string
 // key and a GetAttr step. This is fine with JSON output, because JSON's type
@@ -789,8 +699,8 @@ func actionString(action string) []string {
 // indexes.
 //
 // JavaScript (or similar dynamic language) consumers of these values can
-// iterate over the the steps starting from the root object to reach the
-// value that each path is describing.
+// recursively apply the steps to a given object using an index operation for
+// each step.
 func encodePaths(pathSet cty.PathSet) (json.RawMessage, error) {
 	if pathSet.Empty() {
 		return nil, nil

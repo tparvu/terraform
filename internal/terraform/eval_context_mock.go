@@ -4,7 +4,6 @@ import (
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hcldec"
 	"github.com/hashicorp/terraform/internal/addrs"
-	"github.com/hashicorp/terraform/internal/checks"
 	"github.com/hashicorp/terraform/internal/configs/configschema"
 	"github.com/hashicorp/terraform/internal/instances"
 	"github.com/hashicorp/terraform/internal/lang"
@@ -134,8 +133,8 @@ type MockEvalContext struct {
 	StateCalled bool
 	StateState  *states.SyncState
 
-	ChecksCalled bool
-	ChecksState  *checks.State
+	ConditionsCalled     bool
+	ConditionsConditions *plans.ConditionsSync
 
 	RefreshStateCalled bool
 	RefreshStateState  *states.SyncState
@@ -375,9 +374,9 @@ func (c *MockEvalContext) State() *states.SyncState {
 	return c.StateState
 }
 
-func (c *MockEvalContext) Checks() *checks.State {
-	c.ChecksCalled = true
-	return c.ChecksState
+func (c *MockEvalContext) Conditions() *plans.ConditionsSync {
+	c.ConditionsCalled = true
+	return c.ConditionsConditions
 }
 
 func (c *MockEvalContext) RefreshState() *states.SyncState {

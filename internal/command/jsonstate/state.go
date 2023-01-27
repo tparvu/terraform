@@ -9,7 +9,6 @@ import (
 	ctyjson "github.com/zclconf/go-cty/cty/json"
 
 	"github.com/hashicorp/terraform/internal/addrs"
-	"github.com/hashicorp/terraform/internal/command/jsonchecks"
 	"github.com/hashicorp/terraform/internal/lang/marks"
 	"github.com/hashicorp/terraform/internal/states"
 	"github.com/hashicorp/terraform/internal/states/statefile"
@@ -24,10 +23,9 @@ const FormatVersion = "1.0"
 // state is the top-level representation of the json format of a terraform
 // state.
 type state struct {
-	FormatVersion    string          `json:"format_version,omitempty"`
-	TerraformVersion string          `json:"terraform_version,omitempty"`
-	Values           *stateValues    `json:"values,omitempty"`
-	Checks           json.RawMessage `json:"checks,omitempty"`
+	FormatVersion    string       `json:"format_version,omitempty"`
+	TerraformVersion string       `json:"terraform_version,omitempty"`
+	Values           *stateValues `json:"values,omitempty"`
 }
 
 // stateValues is the common representation of resolved values for both the prior
@@ -40,7 +38,6 @@ type stateValues struct {
 type output struct {
 	Sensitive bool            `json:"sensitive"`
 	Value     json.RawMessage `json:"value,omitempty"`
-	Type      json.RawMessage `json:"type,omitempty"`
 }
 
 // module is the representation of a module in state. This can be the root module
@@ -152,11 +149,6 @@ func Marshal(sf *statefile.File, schemas *terraform.Schemas) ([]byte, error) {
 		return nil, err
 	}
 
-	// output.Checks
-	if sf.State.CheckResults != nil && sf.State.CheckResults.ConfigResults.Len() > 0 {
-		output.Checks = jsonchecks.MarshalCheckStates(sf.State.CheckResults)
-	}
-
 	ret, err := json.Marshal(output)
 	return ret, err
 }
@@ -166,7 +158,7 @@ func (jsonstate *state) marshalStateValues(s *states.State, schemas *terraform.S
 	var err error
 
 	// only marshal the root module outputs
-	sv.Outputs, err = MarshalOutputs(s.RootModule().OutputValues)
+	sv.Outputs, err = marshalOutputs(s.RootModule().OutputValues)
 	if err != nil {
 		return err
 	}
@@ -181,27 +173,19 @@ func (jsonstate *state) marshalStateValues(s *states.State, schemas *terraform.S
 	return nil
 }
 
-// MarshalOutputs translates a map of states.OutputValue to a map of jsonstate.output,
-// which are defined for json encoding.
-func MarshalOutputs(outputs map[string]*states.OutputValue) (map[string]output, error) {
+func marshalOutputs(outputs map[string]*states.OutputValue) (map[string]output, error) {
 	if outputs == nil {
 		return nil, nil
 	}
 
 	ret := make(map[string]output)
 	for k, v := range outputs {
-		ty := v.Value.Type()
-		ov, err := ctyjson.Marshal(v.Value, ty)
-		if err != nil {
-			return ret, err
-		}
-		ot, err := ctyjson.MarshalType(ty)
+		ov, err := ctyjson.Marshal(v.Value, v.Value.Type())
 		if err != nil {
 			return ret, err
 		}
 		ret[k] = output{
 			Value:     ov,
-			Type:      ot,
 			Sensitive: v.Sensitive,
 		}
 	}

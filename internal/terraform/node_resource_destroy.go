@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/hashicorp/terraform/internal/instances"
 	"github.com/hashicorp/terraform/internal/plans"
 	"github.com/hashicorp/terraform/internal/tfdiags"
 
@@ -211,7 +210,7 @@ func (n *NodeDestroyResourceInstance) managedResourceExecute(ctx EvalContext) (d
 	// Managed resources need to be destroyed, while data sources
 	// are only removed from state.
 	// we pass a nil configuration to apply because we are destroying
-	s, d := n.apply(ctx, state, changeApply, nil, instances.RepetitionData{}, false)
+	s, _, d := n.apply(ctx, state, changeApply, nil, false)
 	state, diags = s, diags.Append(d)
 	// we don't return immediately here on error, so that the state can be
 	// finalized

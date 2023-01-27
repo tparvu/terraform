@@ -83,9 +83,8 @@ var goGetterGetters = map[string]getter.Getter{
 var getterHTTPClient = cleanhttp.DefaultClient()
 
 var getterHTTPGetter = &getter.HttpGetter{
-	Client:             getterHTTPClient,
-	Netrc:              true,
-	XTerraformGetLimit: 10,
+	Client: getterHTTPClient,
+	Netrc:  true,
 }
 
 // A reusingGetter is a helper for the module installer that remembers

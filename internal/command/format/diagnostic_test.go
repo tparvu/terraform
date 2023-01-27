@@ -6,11 +6,9 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/hashicorp/hcl/v2"
-	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/hashicorp/hcl/v2/hcltest"
 	"github.com/mitchellh/colorstring"
 	"github.com/zclconf/go-cty/cty"
-	"github.com/zclconf/go-cty/cty/function"
 
 	viewsjson "github.com/hashicorp/terraform/internal/command/views/json"
 	"github.com/hashicorp/terraform/internal/lang/marks"
@@ -130,7 +128,6 @@ func TestDiagnostic(t *testing.T) {
 						}),
 					},
 				},
-				Extra: diagnosticCausedBySensitive(true),
 			},
 			`[red]╷[reset]
 [red]│[reset] [bold][red]Error: [reset][bold]Bad bad bad[reset]
@@ -165,7 +162,6 @@ func TestDiagnostic(t *testing.T) {
 						}),
 					},
 				},
-				Extra: diagnosticCausedByUnknown(true),
 			},
 			`[red]╷[reset]
 [red]│[reset] [bold][red]Error: [reset][bold]Bad bad bad[reset]
@@ -200,7 +196,6 @@ func TestDiagnostic(t *testing.T) {
 						}),
 					},
 				},
-				Extra: diagnosticCausedByUnknown(true),
 			},
 			`[red]╷[reset]
 [red]│[reset] [bold][red]Error: [reset][bold]Bad bad bad[reset]
@@ -209,54 +204,6 @@ func TestDiagnostic(t *testing.T) {
 [red]│[reset]    1: test [underline]source[reset] code
 [red]│[reset]     [dark_gray]├────────────────[reset]
 [red]│[reset]     [dark_gray]│[reset] [bold]boop.beep[reset] will be known only after apply
-[red]│[reset]
-[red]│[reset] Whatever shall we do?
-[red]╵[reset]
-`,
-		},
-		"error with source code subject and function call annotation": {
-			&hcl.Diagnostic{
-				Severity: hcl.DiagError,
-				Summary:  "Bad bad bad",
-				Detail:   "Whatever shall we do?",
-				Subject: &hcl.Range{
-					Filename: "test.tf",
-					Start:    hcl.Pos{Line: 1, Column: 6, Byte: 5},
-					End:      hcl.Pos{Line: 1, Column: 12, Byte: 11},
-				},
-				Expression: hcltest.MockExprLiteral(cty.True),
-				EvalContext: &hcl.EvalContext{
-					Functions: map[string]function.Function{
-						"beep": function.New(&function.Spec{
-							Params: []function.Parameter{
-								{
-									Name: "pos_param_0",
-									Type: cty.String,
-								},
-								{
-									Name: "pos_param_1",
-									Type: cty.Number,
-								},
-							},
-							VarParam: &function.Parameter{
-								Name: "var_param",
-								Type: cty.Bool,
-							},
-						}),
-					},
-				},
-				// This is simulating what the HCL function call expression
-				// type would generate on evaluation, by implementing the
-				// same interface it uses.
-				Extra: fakeDiagFunctionCallExtra("beep"),
-			},
-			`[red]╷[reset]
-[red]│[reset] [bold][red]Error: [reset][bold]Bad bad bad[reset]
-[red]│[reset]
-[red]│[reset]   on test.tf line 1:
-[red]│[reset]    1: test [underline]source[reset] code
-[red]│[reset]     [dark_gray]├────────────────[reset]
-[red]│[reset]     [dark_gray]│[reset] while calling [bold]beep[reset](pos_param_0, pos_param_1, var_param...)
 [red]│[reset]
 [red]│[reset] Whatever shall we do?
 [red]╵[reset]
@@ -394,7 +341,6 @@ Whatever shall we do?
 						}),
 					},
 				},
-				Extra: diagnosticCausedBySensitive(true),
 			},
 			`
 Error: Bad bad bad
@@ -403,37 +349,6 @@ Error: Bad bad bad
    1: test source code
     ├────────────────
     │ boop.beep has a sensitive value
-
-Whatever shall we do?
-`,
-		},
-		"error with source code subject and expression referring to sensitive value when not related to sensitivity": {
-			&hcl.Diagnostic{
-				Severity: hcl.DiagError,
-				Summary:  "Bad bad bad",
-				Detail:   "Whatever shall we do?",
-				Subject: &hcl.Range{
-					Filename: "test.tf",
-					Start:    hcl.Pos{Line: 1, Column: 6, Byte: 5},
-					End:      hcl.Pos{Line: 1, Column: 12, Byte: 11},
-				},
-				Expression: hcltest.MockExprTraversal(hcl.Traversal{
-					hcl.TraverseRoot{Name: "boop"},
-					hcl.TraverseAttr{Name: "beep"},
-				}),
-				EvalContext: &hcl.EvalContext{
-					Variables: map[string]cty.Value{
-						"boop": cty.ObjectVal(map[string]cty.Value{
-							"beep": cty.StringVal("blah").Mark(marks.Sensitive),
-						}),
-					},
-				},
-			},
-			`
-Error: Bad bad bad
-
-  on test.tf line 1:
-   1: test source code
 
 Whatever shall we do?
 `,
@@ -459,7 +374,6 @@ Whatever shall we do?
 						}),
 					},
 				},
-				Extra: diagnosticCausedByUnknown(true),
 			},
 			`
 Error: Bad bad bad
@@ -468,39 +382,6 @@ Error: Bad bad bad
    1: test source code
     ├────────────────
     │ boop.beep is a string, known only after apply
-
-Whatever shall we do?
-`,
-		},
-		"error with source code subject and unknown string expression when problem isn't unknown-related": {
-			&hcl.Diagnostic{
-				Severity: hcl.DiagError,
-				Summary:  "Bad bad bad",
-				Detail:   "Whatever shall we do?",
-				Subject: &hcl.Range{
-					Filename: "test.tf",
-					Start:    hcl.Pos{Line: 1, Column: 6, Byte: 5},
-					End:      hcl.Pos{Line: 1, Column: 12, Byte: 11},
-				},
-				Expression: hcltest.MockExprTraversal(hcl.Traversal{
-					hcl.TraverseRoot{Name: "boop"},
-					hcl.TraverseAttr{Name: "beep"},
-				}),
-				EvalContext: &hcl.EvalContext{
-					Variables: map[string]cty.Value{
-						"boop": cty.ObjectVal(map[string]cty.Value{
-							"beep": cty.UnknownVal(cty.String),
-						}),
-					},
-				},
-			},
-			`
-Error: Bad bad bad
-
-  on test.tf line 1:
-   1: test source code
-    ├────────────────
-    │ boop.beep is a string
 
 Whatever shall we do?
 `,
@@ -526,7 +407,6 @@ Whatever shall we do?
 						}),
 					},
 				},
-				Extra: diagnosticCausedByUnknown(true),
 			},
 			`
 Error: Bad bad bad
@@ -535,37 +415,6 @@ Error: Bad bad bad
    1: test source code
     ├────────────────
     │ boop.beep will be known only after apply
-
-Whatever shall we do?
-`,
-		},
-		"error with source code subject and unknown expression of unknown type when problem isn't unknown-related": {
-			&hcl.Diagnostic{
-				Severity: hcl.DiagError,
-				Summary:  "Bad bad bad",
-				Detail:   "Whatever shall we do?",
-				Subject: &hcl.Range{
-					Filename: "test.tf",
-					Start:    hcl.Pos{Line: 1, Column: 6, Byte: 5},
-					End:      hcl.Pos{Line: 1, Column: 12, Byte: 11},
-				},
-				Expression: hcltest.MockExprTraversal(hcl.Traversal{
-					hcl.TraverseRoot{Name: "boop"},
-					hcl.TraverseAttr{Name: "beep"},
-				}),
-				EvalContext: &hcl.EvalContext{
-					Variables: map[string]cty.Value{
-						"boop": cty.ObjectVal(map[string]cty.Value{
-							"beep": cty.UnknownVal(cty.DynamicPseudoType),
-						}),
-					},
-				},
-			},
-			`
-Error: Bad bad bad
-
-  on test.tf line 1:
-   1: test source code
 
 Whatever shall we do?
 `,
@@ -905,41 +754,4 @@ func TestDiagnosticFromJSON_invalid(t *testing.T) {
 			}
 		})
 	}
-}
-
-// fakeDiagFunctionCallExtra is a fake implementation of the interface that
-// HCL uses to provide "extra information" associated with diagnostics that
-// describe errors during a function call.
-type fakeDiagFunctionCallExtra string
-
-var _ hclsyntax.FunctionCallDiagExtra = fakeDiagFunctionCallExtra("")
-
-func (e fakeDiagFunctionCallExtra) CalledFunctionName() string {
-	return string(e)
-}
-
-func (e fakeDiagFunctionCallExtra) FunctionCallError() error {
-	return nil
-}
-
-// diagnosticCausedByUnknown is a testing helper for exercising our logic
-// for selectively showing unknown values alongside our source snippets for
-// diagnostics that are explicitly marked as being caused by unknown values.
-type diagnosticCausedByUnknown bool
-
-var _ tfdiags.DiagnosticExtraBecauseUnknown = diagnosticCausedByUnknown(true)
-
-func (e diagnosticCausedByUnknown) DiagnosticCausedByUnknown() bool {
-	return bool(e)
-}
-
-// diagnosticCausedBySensitive is a testing helper for exercising our logic
-// for selectively showing sensitive values alongside our source snippets for
-// diagnostics that are explicitly marked as being caused by sensitive values.
-type diagnosticCausedBySensitive bool
-
-var _ tfdiags.DiagnosticExtraBecauseSensitive = diagnosticCausedBySensitive(true)
-
-func (e diagnosticCausedBySensitive) DiagnosticCausedBySensitive() bool {
-	return bool(e)
 }

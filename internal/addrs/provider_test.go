@@ -124,7 +124,7 @@ func TestProviderDisplay(t *testing.T) {
 	}
 }
 
-func TestProviderIsDefaultProvider(t *testing.T) {
+func TestProviderIsDefault(t *testing.T) {
 	tests := []struct {
 		Input Provider
 		Want  bool
@@ -156,7 +156,7 @@ func TestProviderIsDefaultProvider(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		got := IsDefaultProvider(test.Input)
+		got := test.Input.IsDefault()
 		if got != test.Want {
 			t.Errorf("wrong result for %s\n", test.Input.String())
 		}

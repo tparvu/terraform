@@ -7,7 +7,7 @@ description: >-
 
 # Function Calls
 
-> **Hands-on:** Try the [Perform Dynamic Operations with Functions](https://learn.hashicorp.com/tutorials/terraform/functions?in=terraform/configuration-language&utm_source=WEBSITE&utm_medium=WEB_IO&utm_offer=ARTICLE_PAGE&utm_content=DOCS) tutorial.
+> **Hands-on:** Try the [Perform Dynamic Operations with Functions](https://learn.hashicorp.com/tutorials/terraform/functions?in=terraform/configuration-language&utm_source=WEBSITE&utm_medium=WEB_IO&utm_offer=ARTICLE_PAGE&utm_content=DOCS) tutorial on HashiCorp Learn.
 
 The Terraform language has a number of
 [built-in functions](/language/functions) that can be used
@@ -63,11 +63,11 @@ the `keys()` function will result in a list that is sensitive:
 ```shell
 > local.baz
 {
-  "a" = (sensitive value)
+  "a" = (sensitive)
   "b" = "dog"
 }
 > keys(local.baz)
-(sensitive value)
+(sensitive)
 ```
 
 ## When Terraform Calls Functions

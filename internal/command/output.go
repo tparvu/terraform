@@ -82,12 +82,17 @@ func (c *OutputCommand) Outputs(statePath string) (map[string]*states.OutputValu
 		return nil, diags
 	}
 
-	output, err := stateStore.GetRootOutputValues()
-	if err != nil {
-		return nil, diags.Append(err)
+	if err := stateStore.RefreshState(); err != nil {
+		diags = diags.Append(fmt.Errorf("Failed to load state: %s", err))
+		return nil, diags
 	}
 
-	return output, diags
+	state := stateStore.State()
+	if state == nil {
+		state = states.NewState()
+	}
+
+	return state.RootModule().OutputValues, nil
 }
 
 func (c *OutputCommand) Help() string {
@@ -102,8 +107,7 @@ Usage: terraform [global options] output [options] [NAME]
 Options:
 
   -state=path      Path to the state file to read. Defaults to
-                   "terraform.tfstate". Ignored when remote 
-                   state is used.
+                   "terraform.tfstate".
 
   -no-color        If specified, output won't contain any color.
 

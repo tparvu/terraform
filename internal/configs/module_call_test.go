@@ -45,7 +45,7 @@ func TestLoadModuleCall(t *testing.T) {
 		{
 			Name: "bar",
 			SourceAddr: addrs.ModuleSourceRegistry{
-				Package: addrs.ModuleRegistryPackage{
+				PackageAddr: addrs.ModuleRegistryPackage{
 					Host:         addrs.DefaultModuleRegistryHost,
 					Namespace:    "hashicorp",
 					Name:         "bar",
@@ -68,7 +68,7 @@ func TestLoadModuleCall(t *testing.T) {
 		{
 			Name: "baz",
 			SourceAddr: addrs.ModuleSourceRemote{
-				Package: addrs.ModulePackage("git::https://example.com/"),
+				PackageAddr: addrs.ModulePackage("git::https://example.com/"),
 			},
 			SourceAddrRaw: "git::https://example.com/",
 			SourceSet:     true,

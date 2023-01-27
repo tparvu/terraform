@@ -114,7 +114,6 @@ func (t *ReferenceTransformer) Transform(g *Graph) error {
 			// use their own state.
 			continue
 		}
-
 		parents := m.References(v)
 		parentsDbg := make([]string, len(parents))
 		for i, v := range parents {
@@ -125,18 +124,10 @@ func (t *ReferenceTransformer) Transform(g *Graph) error {
 			dag.VertexName(v), parentsDbg)
 
 		for _, parent := range parents {
-			// A destroy plan relies solely on the state, so we only need to
-			// ensure that temporary values are connected to get the evaluation
-			// order correct. Any references to destroy nodes will cause
-			// cycles, because they are connected in reverse order.
-			if _, ok := parent.(GraphNodeDestroyer); ok {
-				continue
-			}
-
 			if !graphNodesAreResourceInstancesInDifferentInstancesOfSameModule(v, parent) {
 				g.Connect(dag.BasicEdge(v, parent))
 			} else {
-				log.Printf("[TRACE] ReferenceTransformer: skipping %s => %s inter-module-instance dependency", dag.VertexName(v), dag.VertexName(parent))
+				log.Printf("[TRACE] ReferenceTransformer: skipping %s => %s inter-module-instance dependency", v, parent)
 			}
 		}
 

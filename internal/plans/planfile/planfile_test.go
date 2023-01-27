@@ -49,6 +49,7 @@ func TestRoundtrip(t *testing.T) {
 	// Minimal plan too, since the serialization of the tfplan portion of the
 	// file is tested more fully in tfplan_test.go .
 	planIn := &plans.Plan{
+		Conditions: plans.Conditions{},
 		Changes: &plans.Changes{
 			Resources: []*plans.ResourceInstanceChangeSrc{},
 			Outputs:   []*plans.OutputChangeSrc{},
@@ -62,7 +63,6 @@ func TestRoundtrip(t *testing.T) {
 			Config:    plans.DynamicValue([]byte("config placeholder")),
 			Workspace: "default",
 		},
-		Checks: &states.CheckResults{},
 
 		// Due to some historical oddities in how we've changed modelling over
 		// time, we also include the states (without the corresponding file

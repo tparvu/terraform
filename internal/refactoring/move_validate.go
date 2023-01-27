@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/hashicorp/hcl/v2"
-
 	"github.com/hashicorp/terraform/internal/addrs"
 	"github.com/hashicorp/terraform/internal/configs"
 	"github.com/hashicorp/terraform/internal/dag"
@@ -45,20 +44,55 @@ func ValidateMoves(stmts []MoveStatement, rootCfg *configs.Config, declaredInsts
 		Other     addrs.AbsMoveable
 		StmtRange tfdiags.SourceRange
 	}
-	stmtFrom := addrs.MakeMap[addrs.AbsMoveable, AbsMoveEndpoint]()
-	stmtTo := addrs.MakeMap[addrs.AbsMoveable, AbsMoveEndpoint]()
+	stmtFrom := map[addrs.UniqueKey]AbsMoveEndpoint{}
+	stmtTo := map[addrs.UniqueKey]AbsMoveEndpoint{}
 
 	for _, stmt := range stmts {
 		// Earlier code that constructs MoveStatement values should ensure that
-		// both stmt.From and stmt.To always belong to the same statement.
-		fromMod, _ := stmt.From.ModuleCallTraversals()
+		// both stmt.From and stmt.To always belong to the same statement and
+		// thus to the same module.
+		stmtMod, fromCallSteps := stmt.From.ModuleCallTraversals()
+		_, toCallSteps := stmt.To.ModuleCallTraversals()
 
-		for _, fromModInst := range declaredInsts.InstancesForModule(fromMod) {
-			absFrom := stmt.From.InModuleInstance(fromModInst)
+		modCfg := rootCfg.Descendent(stmtMod)
+		if !stmt.Implied {
+			// Implied statements can cross module boundaries because we
+			// generate them only for changing instance keys on a single
+			// resource. They happen to be generated _as if_ they were written
+			// in the root module, but the source and destination are always
+			// in the same module anyway.
+			if pkgAddr := callsThroughModulePackage(modCfg, fromCallSteps); pkgAddr != nil {
+				diags = diags.Append(&hcl.Diagnostic{
+					Severity: hcl.DiagError,
+					Summary:  "Cross-package move statement",
+					Detail: fmt.Sprintf(
+						"This statement declares a move from an object declared in external module package %q. Move statements can be only within a single module package.",
+						pkgAddr,
+					),
+					Subject: stmt.DeclRange.ToHCL().Ptr(),
+				})
+			}
+			if pkgAddr := callsThroughModulePackage(modCfg, toCallSteps); pkgAddr != nil {
+				diags = diags.Append(&hcl.Diagnostic{
+					Severity: hcl.DiagError,
+					Summary:  "Cross-package move statement",
+					Detail: fmt.Sprintf(
+						"This statement declares a move to an object declared in external module package %q. Move statements can be only within a single module package.",
+						pkgAddr,
+					),
+					Subject: stmt.DeclRange.ToHCL().Ptr(),
+				})
+			}
+		}
 
-			absTo := stmt.To.InModuleInstance(fromModInst)
+		for _, modInst := range declaredInsts.InstancesForModule(stmtMod) {
 
-			if addrs.Equivalent(absFrom, absTo) {
+			absFrom := stmt.From.InModuleInstance(modInst)
+			absTo := stmt.To.InModuleInstance(modInst)
+			fromKey := absFrom.UniqueKey()
+			toKey := absTo.UniqueKey()
+
+			if fromKey == toKey {
 				diags = diags.Append(&hcl.Diagnostic{
 					Severity: hcl.DiagError,
 					Summary:  "Redundant move statement",
@@ -115,8 +149,8 @@ func ValidateMoves(stmts []MoveStatement, rootCfg *configs.Config, declaredInsts
 			}
 
 			// There can only be one destination for each source address.
-			if existing, exists := stmtFrom.GetOk(absFrom); exists {
-				if !addrs.Equivalent(existing.Other, absTo) {
+			if existing, exists := stmtFrom[fromKey]; exists {
+				if existing.Other.UniqueKey() != toKey {
 					diags = diags.Append(&hcl.Diagnostic{
 						Severity: hcl.DiagError,
 						Summary:  "Ambiguous move statements",
@@ -129,15 +163,15 @@ func ValidateMoves(stmts []MoveStatement, rootCfg *configs.Config, declaredInsts
 					})
 				}
 			} else {
-				stmtFrom.Put(absFrom, AbsMoveEndpoint{
+				stmtFrom[fromKey] = AbsMoveEndpoint{
 					Other:     absTo,
 					StmtRange: stmt.DeclRange,
-				})
+				}
 			}
 
 			// There can only be one source for each destination address.
-			if existing, exists := stmtTo.GetOk(absTo); exists {
-				if !addrs.Equivalent(existing.Other, absFrom) {
+			if existing, exists := stmtTo[toKey]; exists {
+				if existing.Other.UniqueKey() != fromKey {
 					diags = diags.Append(&hcl.Diagnostic{
 						Severity: hcl.DiagError,
 						Summary:  "Ambiguous move statements",
@@ -150,10 +184,10 @@ func ValidateMoves(stmts []MoveStatement, rootCfg *configs.Config, declaredInsts
 					})
 				}
 			} else {
-				stmtTo.Put(absTo, AbsMoveEndpoint{
+				stmtTo[toKey] = AbsMoveEndpoint{
 					Other:     absFrom,
 					StmtRange: stmt.DeclRange,
-				})
+				}
 			}
 
 			// Resource types must match.
@@ -166,7 +200,6 @@ func ValidateMoves(stmts []MoveStatement, rootCfg *configs.Config, declaredInsts
 					),
 				})
 			}
-
 		}
 	}
 
@@ -337,4 +370,25 @@ func movableObjectDeclRange(addr addrs.AbsMoveable, cfg *configs.Config) (tfdiag
 		// The above cases should cover all of the AbsMoveable types
 		panic("unsupported AbsMoveable address type")
 	}
+}
+
+func callsThroughModulePackage(modCfg *configs.Config, callSteps []addrs.ModuleCall) addrs.ModuleSource {
+	var sourceAddr addrs.ModuleSource
+	current := modCfg
+	for _, step := range callSteps {
+		call := current.Module.ModuleCalls[step.Name]
+		if call == nil {
+			break
+		}
+		if call.EntersNewPackage() {
+			sourceAddr = call.SourceAddr
+		}
+		current = modCfg.Children[step.Name]
+		if current == nil {
+			// Weird to have a call but not a config, but we'll tolerate
+			// it to avoid crashing here.
+			break
+		}
+	}
+	return sourceAddr
 }

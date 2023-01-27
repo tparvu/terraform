@@ -82,7 +82,7 @@ func TestRemoteState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.PersistState(nil); err != nil {
+	if err := s.PersistState(); err != nil {
 		t.Fatal(err)
 	}
 

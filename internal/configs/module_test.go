@@ -208,10 +208,9 @@ func TestModule_required_provider_overrides(t *testing.T) {
 // Resources without explicit provider configuration are assigned a provider
 // implied based on the resource type. For example, this resource:
 //
-//	resource "foo_instance" "test" {}
+//  resource foo_instance "test" { }
 //
-// ...is assigned to whichever provider has local name "foo" in the current
-// module.
+// is assigned a provider with type "foo".
 //
 // To find the correct provider, we first look in the module's provider
 // requirements map for a local name matching the resource type, and fall back

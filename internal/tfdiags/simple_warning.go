@@ -28,8 +28,3 @@ func (e simpleWarning) FromExpr() *FromExpr {
 	// Simple warnings are not expression-related
 	return nil
 }
-
-func (e simpleWarning) ExtraInfo() interface{} {
-	// Simple warnings cannot carry extra information.
-	return nil
-}

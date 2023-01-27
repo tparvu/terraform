@@ -4,7 +4,6 @@
         "outputs": {
             "test": {
                 "sensitive": false,
-                "type": "string",
                 "value": "baz"
             }
         },
@@ -80,7 +79,6 @@
             "outputs": {
                 "test": {
                     "sensitive": false,
-                    "type": "string",
                     "value": "baz"
                 }
             },

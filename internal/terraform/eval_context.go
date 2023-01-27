@@ -3,7 +3,6 @@ package terraform
 import (
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/terraform/internal/addrs"
-	"github.com/hashicorp/terraform/internal/checks"
 	"github.com/hashicorp/terraform/internal/configs/configschema"
 	"github.com/hashicorp/terraform/internal/instances"
 	"github.com/hashicorp/terraform/internal/lang"
@@ -165,9 +164,9 @@ type EvalContext interface {
 	// the global state.
 	State() *states.SyncState
 
-	// Checks returns the object that tracks the state of any custom checks
-	// declared in the configuration.
-	Checks() *checks.State
+	// Conditions returns the writer object that can be used to store condition
+	// block results as they are evaluated.
+	Conditions() *plans.ConditionsSync
 
 	// RefreshState returns a wrapper object that provides safe concurrent
 	// access to the state used to store the most recently refreshed resource

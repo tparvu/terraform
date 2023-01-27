@@ -670,10 +670,8 @@ func Index(list, value cty.Value) (cty.Value, error) {
 	return IndexFunc.Call([]cty.Value{list, value})
 }
 
-// List takes any number of arguments of types that can unify into a single
-// type and returns a list containing those values in the same order, or
-// returns an error if there is no single element type that all values can
-// convert to.
+// List takes any number of list arguments and returns a list containing those
+//  values in the same order.
 func List(args ...cty.Value) (cty.Value, error) {
 	return ListFunc.Call(args)
 }

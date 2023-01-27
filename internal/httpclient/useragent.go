@@ -13,7 +13,7 @@ import (
 const userAgentFormat = "Terraform/%s"
 const uaEnvVar = "TF_APPEND_USER_AGENT"
 
-// Deprecated: Use TerraformUserAgent(version) instead
+// Deprecated: Use UserAgent(version) instead
 func UserAgentString() string {
 	ua := fmt.Sprintf(userAgentFormat, version.Version)
 

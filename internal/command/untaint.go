@@ -9,7 +9,6 @@ import (
 	"github.com/hashicorp/terraform/internal/command/clistate"
 	"github.com/hashicorp/terraform/internal/command/views"
 	"github.com/hashicorp/terraform/internal/states"
-	"github.com/hashicorp/terraform/internal/terraform"
 	"github.com/hashicorp/terraform/internal/tfdiags"
 )
 
@@ -164,15 +163,6 @@ func (c *UntaintCommand) Run(args []string) int {
 		c.showDiagnostics(diags)
 		return 1
 	}
-
-	// Get schemas, if possible, before writing state
-	var schemas *terraform.Schemas
-	if isCloudMode(b) {
-		var schemaDiags tfdiags.Diagnostics
-		schemas, schemaDiags = c.MaybeGetSchemas(state, nil)
-		diags = diags.Append(schemaDiags)
-	}
-
 	obj.Status = states.ObjectReady
 	ss.SetResourceInstanceCurrent(addr, obj, rs.ProviderConfig)
 
@@ -180,12 +170,11 @@ func (c *UntaintCommand) Run(args []string) int {
 		c.Ui.Error(fmt.Sprintf("Error writing state file: %s", err))
 		return 1
 	}
-	if err := stateMgr.PersistState(schemas); err != nil {
+	if err := stateMgr.PersistState(); err != nil {
 		c.Ui.Error(fmt.Sprintf("Error writing state file: %s", err))
 		return 1
 	}
 
-	c.showDiagnostics(diags)
 	c.Ui.Output(fmt.Sprintf("Resource instance %s has been successfully untainted.", addr))
 	return 0
 }

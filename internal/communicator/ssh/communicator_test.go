@@ -577,28 +577,10 @@ func TestAccUploadFile(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
-	source, err := os.CreateTemp(tmpDir, "tempfile.in")
-	if err != nil {
-		t.Fatal(err)
-	}
 
-	content := "this is the file content"
-	if _, err := source.WriteString(content); err != nil {
-		t.Fatal(err)
-	}
-	source.Seek(0, io.SeekStart)
-
+	content := []byte("this is the file content")
+	source := bytes.NewReader(content)
 	tmpFile := filepath.Join(tmpDir, "tempFile.out")
-
-	testUploadSizeHook = func(size int64) {
-		if size != int64(len(content)) {
-			t.Errorf("expected %d bytes, got %d\n", len(content), size)
-		}
-	}
-	defer func() {
-		testUploadSizeHook = nil
-	}()
-
 	err = c.Upload(tmpFile, source)
 	if err != nil {
 		t.Fatalf("error uploading file: %s", err)
@@ -609,7 +591,7 @@ func TestAccUploadFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if string(data) != content {
+	if !bytes.Equal(data, content) {
 		t.Fatalf("bad: %s", data)
 	}
 }

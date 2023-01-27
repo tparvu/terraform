@@ -171,8 +171,8 @@ EOT_`,
 			`toset([])`,
 		},
 		{
-			cty.StringVal("a sensitive value").Mark(marks.Sensitive),
-			"(sensitive value)",
+			cty.StringVal("sensitive value").Mark(marks.Sensitive),
+			"(sensitive)",
 		},
 	}
 

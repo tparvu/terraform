@@ -1,5 +1,5 @@
 provider "aws" {
-    value = "${test_instance.bar.id}"
+    value = "${test_instance.bar.value}"
 }
 
 resource "aws_instance" "foo" {

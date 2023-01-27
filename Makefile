@@ -1,3 +1,21 @@
+WEBSITE_REPO=github.com/hashicorp/terraform-website
+VERSION?="0.3.44"
+PWD=$$(pwd)
+DOCKER_IMAGE="hashicorp/terraform-website:full"
+DOCKER_IMAGE_LOCAL="hashicorp-terraform-website-local"
+DOCKER_RUN_FLAGS=--interactive \
+	--rm \
+	--tty \
+	--workdir "/website" \
+	--volume "$(shell pwd):/website/ext/terraform" \
+	--volume "$(shell pwd)/website:/website/preview" \
+	--publish "3000:3000" \
+	-e "IS_CONTENT_PREVIEW=true" \
+	-e "PREVIEW_FROM_REPO=terraform" \
+	-e "NAV_DATA_DIRNAME=./preview/data" \
+	-e "CONTENT_DIRNAME=./preview/docs" \
+	-e "CURRENT_GIT_BRANCH=$$(git rev-parse --abbrev-ref HEAD)"
+
 # generate runs `go generate` to build the dynamically generated
 # source files, except the protobuf stubs which are built instead with
 # "make protobuf".
@@ -15,32 +33,34 @@ protobuf:
 	go run ./tools/protobuf-compile .
 
 fmtcheck:
-	"$(CURDIR)/scripts/gofmtcheck.sh"
-
-importscheck:
-	"$(CURDIR)/scripts/goimportscheck.sh"
+	@sh -c "'$(CURDIR)/scripts/gofmtcheck.sh'"
 
 staticcheck:
-	"$(CURDIR)/scripts/staticcheck.sh"
+	@sh -c "'$(CURDIR)/scripts/staticcheck.sh'"
 
 exhaustive:
-	"$(CURDIR)/scripts/exhaustive.sh"
+	@sh -c "'$(CURDIR)/scripts/exhaustive.sh'"
 
-# Run this if working on the website locally to run in watch mode.
+# Default: run this if working on the website locally to run in watch mode.
 website:
-	$(MAKE) -C website website
+	@echo "==> Downloading latest Docker image..."
+	@docker pull ${DOCKER_IMAGE}
+	@echo "==> Starting website in Docker..."
+	@docker run ${DOCKER_RUN_FLAGS} ${DOCKER_IMAGE} npm start
 
-# Use this if you have run `website/build-local` to use the locally built image.
 website/local:
-	$(MAKE) -C website website/local
+	@echo "==> Starting website in Docker..."
+	@docker run ${DOCKER_RUN_FLAGS} ${DOCKER_IMAGE_LOCAL} npm start
 
-# Run this to generate a new local Docker image.
+.PHONY: website/build-local
 website/build-local:
-	$(MAKE) -C website website/build-local
+	@echo "==> Building local Docker image"
+	@docker build https://github.com/hashicorp/terraform-website.git\#master \
+		-t $(DOCKER_IMAGE_LOCAL)
 
 # disallow any parallelism (-j) for Make. This is necessary since some
 # commands during the build process create temporary files that collide
 # under parallel conditions.
 .NOTPARALLEL:
 
-.PHONY: fmtcheck importscheck generate protobuf staticcheck website website/local website/build-local
+.PHONY: fmtcheck generate protobuf website website-test staticcheck website/local website/build-local

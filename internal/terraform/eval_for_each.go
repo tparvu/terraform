@@ -70,7 +70,6 @@ func evaluateForEachExpressionValue(expr hcl.Expression, ctx EvalContext, allowU
 			Subject:     expr.Range().Ptr(),
 			Expression:  expr,
 			EvalContext: hclCtx,
-			Extra:       diagnosticCausedBySensitive(true),
 		})
 	}
 
@@ -110,7 +109,6 @@ func evaluateForEachExpressionValue(expr hcl.Expression, ctx EvalContext, allowU
 				Subject:     expr.Range().Ptr(),
 				Expression:  expr,
 				EvalContext: hclCtx,
-				Extra:       diagnosticCausedByUnknown(true),
 			})
 		}
 		// ensure that we have a map, and not a DynamicValue
@@ -146,7 +144,6 @@ func evaluateForEachExpressionValue(expr hcl.Expression, ctx EvalContext, allowU
 					Subject:     expr.Range().Ptr(),
 					Expression:  expr,
 					EvalContext: hclCtx,
-					Extra:       diagnosticCausedByUnknown(true),
 				})
 			}
 			return cty.UnknownVal(ty), diags

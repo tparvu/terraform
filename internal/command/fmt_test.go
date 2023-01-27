@@ -166,16 +166,7 @@ func TestFmt_snippetInError(t *testing.T) {
 	}
 }
 
-func TestFmt_manyArgs(t *testing.T) {
-	tempDir := fmtFixtureWriteDir(t)
-	// Add a second file
-	secondSrc := `locals { x = 1 }`
-
-	err := ioutil.WriteFile(filepath.Join(tempDir, "second.tf"), []byte(secondSrc), 0644)
-	if err != nil {
-		t.Fatal(err)
-	}
-
+func TestFmt_tooManyArgs(t *testing.T) {
 	ui := new(cli.MockUi)
 	c := &FmtCommand{
 		Meta: Meta{
@@ -185,21 +176,16 @@ func TestFmt_manyArgs(t *testing.T) {
 	}
 
 	args := []string{
-		filepath.Join(tempDir, "main.tf"),
-		filepath.Join(tempDir, "second.tf"),
+		"one",
+		"two",
 	}
-	if code := c.Run(args); code != 0 {
+	if code := c.Run(args); code != 1 {
 		t.Fatalf("wrong exit code. errors: \n%s", ui.ErrorWriter.String())
 	}
 
-	got, err := filepath.Abs(strings.TrimSpace(ui.OutputWriter.String()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := filepath.Join(tempDir, fmtFixture.filename)
-
-	if got != want {
-		t.Fatalf("wrong output\ngot:  %s\nwant: %s", got, want)
+	expected := "The fmt command expects at most one argument."
+	if actual := ui.ErrorWriter.String(); !strings.Contains(actual, expected) {
+		t.Fatalf("expected:\n%s\n\nto include: %q", actual, expected)
 	}
 }
 

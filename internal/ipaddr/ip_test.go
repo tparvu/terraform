@@ -10,7 +10,9 @@ import (
 	"testing"
 )
 
+//
 // Lean on the standard net lib as much as possible.
+//
 type IPMask = stdnet.IPMask
 
 var IPv4Mask = stdnet.IPv4Mask

@@ -13,14 +13,6 @@ import (
 	"github.com/hashicorp/terraform/internal/tfdiags"
 )
 
-type providersLockChangeType string
-
-const (
-	providersLockChangeTypeNoChange    providersLockChangeType = "providersLockChangeTypeNoChange"
-	providersLockChangeTypeNewProvider providersLockChangeType = "providersLockChangeTypeNewProvider"
-	providersLockChangeTypeNewHashes   providersLockChangeType = "providersLockChangeTypeNewHashes"
-)
-
 // ProvidersLockCommand is a Command implementation that implements the
 // "terraform providers lock" command, which creates or updates the current
 // configuration's dependency lock file using information from upstream
@@ -233,7 +225,7 @@ func (c *ProvidersLockCommand) Run(args []string) int {
 				if keyID != "" {
 					keyID = c.Colorize().Color(fmt.Sprintf(", key ID [reset][bold]%s[reset]", keyID))
 				}
-				c.Ui.Output(fmt.Sprintf("- Retrieved %s %s for %s (%s%s)", provider.ForDisplay(), version, platform, auth, keyID))
+				c.Ui.Output(fmt.Sprintf("- Obtained %s checksums for %s (%s%s)", provider.ForDisplay(), platform, auth, keyID))
 			},
 		}
 		ctx := evts.OnContext(ctx)
@@ -241,7 +233,7 @@ func (c *ProvidersLockCommand) Run(args []string) int {
 		dir := providercache.NewDirWithPlatform(tempDir, platform)
 		installer := providercache.NewInstaller(dir, source)
 
-		newLocks, err := installer.EnsureProviderVersions(ctx, oldLocks, reqs, providercache.InstallNewProvidersForce)
+		newLocks, err := installer.EnsureProviderVersions(ctx, oldLocks, reqs, providercache.InstallNewProvidersOnly)
 		if err != nil {
 			diags = diags.Append(tfdiags.Sourceless(
 				tfdiags.Error,
@@ -259,10 +251,6 @@ func (c *ProvidersLockCommand) Run(args []string) int {
 		c.showDiagnostics(diags)
 		return 1
 	}
-
-	// Track whether we've made any changes to the lock file as part of this
-	// operation. We can customise the final message based on our actions.
-	madeAnyChange := false
 
 	// We now have a separate updated locks object for each platform. We need
 	// to merge those all together so that the final result has the union of
@@ -282,7 +270,7 @@ func (c *ProvidersLockCommand) Run(args []string) int {
 			constraints = oldLock.VersionConstraints()
 			hashes = append(hashes, oldLock.AllHashes()...)
 		}
-		for platform, platformLocks := range updatedLocks {
+		for _, platformLocks := range updatedLocks {
 			platformLock := platformLocks.Provider(provider)
 			if platformLock == nil {
 				continue // weird, but we'll tolerate it to avoid crashing
@@ -294,32 +282,6 @@ func (c *ProvidersLockCommand) Run(args []string) int {
 			// platforms here, because the SetProvider method we call below
 			// handles that automatically.
 			hashes = append(hashes, platformLock.AllHashes()...)
-
-			// At this point, we've merged all the hashes for this (provider, platform)
-			// combo into the combined hashes for this provider. Let's take this
-			// opportunity to print out a summary for this particular combination.
-			switch providersLockCalculateChangeType(oldLock, platformLock) {
-			case providersLockChangeTypeNewProvider:
-				madeAnyChange = true
-				c.Ui.Output(
-					fmt.Sprintf(
-						"- Obtained %s checksums for %s; This was a new provider and the checksums for this platform are now tracked in the lock file",
-						provider.ForDisplay(),
-						platform))
-			case providersLockChangeTypeNewHashes:
-				madeAnyChange = true
-				c.Ui.Output(
-					fmt.Sprintf(
-						"- Obtained %s checksums for %s; Additional checksums for this platform are now tracked in the lock file",
-						provider.ForDisplay(),
-						platform))
-			case providersLockChangeTypeNoChange:
-				c.Ui.Output(
-					fmt.Sprintf(
-						"- Obtained %s checksums for %s; All checksums for this platform were already tracked in the lock file",
-						provider.ForDisplay(),
-						platform))
-			}
 		}
 		newLocks.SetProvider(provider, version, constraints, hashes)
 	}
@@ -332,12 +294,8 @@ func (c *ProvidersLockCommand) Run(args []string) int {
 		return 1
 	}
 
-	if madeAnyChange {
-		c.Ui.Output(c.Colorize().Color("\n[bold][green]Success![reset] [bold]Terraform has updated the lock file.[reset]"))
-		c.Ui.Output("\nReview the changes in .terraform.lock.hcl and then commit to your\nversion control system to retain the new checksums.\n")
-	} else {
-		c.Ui.Output(c.Colorize().Color("\n[bold][green]Success![reset] [bold]Terraform has validated the lock file and found no need for changes.[reset]"))
-	}
+	c.Ui.Output(c.Colorize().Color("\n[bold][green]Success![reset] [bold]Terraform has updated the lock file.[reset]"))
+	c.Ui.Output("\nReview the changes in .terraform.lock.hcl and then commit to your\nversion control system to retain the new checksums.\n")
 	return 0
 }
 
@@ -398,29 +356,4 @@ Options:
                      CPU. Each provider is available only for a limited
                      set of target platforms.
 `
-}
-
-// providersLockCalculateChangeType works out whether there is any difference
-// between oldLock and newLock and returns a variable the main function can use
-// to decide on which message to print.
-//
-// One assumption made here that is not obvious without the context from the
-// main function is that while platformLock contains the lock information for a
-// single platform after the current run, oldLock contains the combined
-// information of all platforms from when the versions were last checked. A
-// simple equality check is not sufficient for deciding on change as we expect
-// that oldLock will be a superset of platformLock if no new hashes have been
-// found.
-//
-// We've separated this function out so we can write unit tests around the
-// logic. This function assumes the platformLock is not nil, as the main
-// function explicitly checks this before calling this function.
-func providersLockCalculateChangeType(oldLock *depsfile.ProviderLock, platformLock *depsfile.ProviderLock) providersLockChangeType {
-	if oldLock == nil {
-		return providersLockChangeTypeNewProvider
-	}
-	if oldLock.ContainsAll(platformLock) {
-		return providersLockChangeTypeNoChange
-	}
-	return providersLockChangeTypeNewHashes
 }

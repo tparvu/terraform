@@ -33,6 +33,16 @@ type PlanOpts struct {
 	// instance using its corresponding provider.
 	SkipRefresh bool
 
+	// PreDestroyRefresh indicated that this is being passed to a plan used to
+	// refresh the state immediately before a destroy plan.
+	// FIXME: This is a temporary fix to allow the pre-destroy refresh to
+	// succeed. The refreshing operation during destroy must be a special case,
+	// which can allow for missing instances in the state, and avoid blocking
+	// on failing condition tests. The destroy plan itself should be
+	// responsible for this special case of refreshing, and the separate
+	// pre-destroy plan removed entirely.
+	PreDestroyRefresh bool
+
 	// SetVariables are the raw values for root module variables as provided
 	// by the user who is requesting the run, prior to any normalization or
 	// substitution of defaults. See the documentation for the InputValue
@@ -315,7 +325,6 @@ func (c *Context) refreshOnlyPlan(config *configs.Config, prevRunState *states.S
 
 func (c *Context) destroyPlan(config *configs.Config, prevRunState *states.State, opts *PlanOpts) (*plans.Plan, tfdiags.Diagnostics) {
 	var diags tfdiags.Diagnostics
-	pendingPlan := &plans.Plan{}
 
 	if opts.Mode != plans.DestroyMode {
 		panic(fmt.Sprintf("called Context.destroyPlan with %s", opts.Mode))
@@ -334,11 +343,19 @@ func (c *Context) destroyPlan(config *configs.Config, prevRunState *states.State
 	// must coordinate with this by taking that action only when c.skipRefresh
 	// _is_ set. This coupling between the two is unfortunate but necessary
 	// to work within our current structure.
-	if !opts.SkipRefresh {
+	if !opts.SkipRefresh && !prevRunState.Empty() {
 		log.Printf("[TRACE] Context.destroyPlan: calling Context.plan to get the effect of refreshing the prior state")
-		normalOpts := *opts
-		normalOpts.Mode = plans.NormalMode
-		refreshPlan, refreshDiags := c.plan(config, prevRunState, &normalOpts)
+		refreshOpts := *opts
+		refreshOpts.Mode = plans.NormalMode
+		refreshOpts.PreDestroyRefresh = true
+
+		// FIXME: A normal plan is required here to refresh the state, because
+		// the state and configuration may not match during a destroy, and a
+		// normal refresh plan can fail with evaluation errors. In the future
+		// the destroy plan should take care of refreshing instances itself,
+		// where the special cases of evaluation and skipping condition checks
+		// can be done.
+		refreshPlan, refreshDiags := c.plan(config, prevRunState, &refreshOpts)
 		if refreshDiags.HasErrors() {
 			// NOTE: Normally we'd append diagnostics regardless of whether
 			// there are errors, just in case there are warnings we'd want to
@@ -355,18 +372,17 @@ func (c *Context) destroyPlan(config *configs.Config, prevRunState *states.State
 			return nil, diags
 		}
 
-		// insert the refreshed state into the destroy plan result, and ignore
-		// the changes recorded from the refresh.
-		pendingPlan.PriorState = refreshPlan.PriorState.DeepCopy()
-		pendingPlan.PrevRunState = refreshPlan.PrevRunState.DeepCopy()
-		log.Printf("[TRACE] Context.destroyPlan: now _really_ creating a destroy plan")
-
 		// We'll use the refreshed state -- which is the  "prior state" from
-		// the perspective of this "pending plan" -- as the starting state
+		// the perspective of this "destroy plan" -- as the starting state
 		// for our destroy-plan walk, so it can take into account if we
 		// detected during refreshing that anything was already deleted outside
 		// of Terraform.
-		priorState = pendingPlan.PriorState
+		priorState = refreshPlan.PriorState.DeepCopy()
+
+		// The refresh plan may have upgraded state for some resources, make
+		// sure we store the new version.
+		prevRunState = refreshPlan.PrevRunState.DeepCopy()
+		log.Printf("[TRACE] Context.destroyPlan: now _really_ creating a destroy plan")
 	}
 
 	destroyPlan, walkDiags := c.planWalk(config, priorState, opts)
@@ -376,10 +392,10 @@ func (c *Context) destroyPlan(config *configs.Config, prevRunState *states.State
 	}
 
 	if !opts.SkipRefresh {
-		// If we didn't skip refreshing then we want the previous run state
-		// prior state to be the one we originally fed into the c.plan call
-		// above, not the refreshed version we used for the destroy walk.
-		destroyPlan.PrevRunState = pendingPlan.PrevRunState
+		// If we didn't skip refreshing then we want the previous run state to
+		// be the one we originally fed into the c.refreshOnlyPlan call above,
+		// not the refreshed version we used for the destroy planWalk.
+		destroyPlan.PrevRunState = prevRunState
 	}
 
 	relevantAttrs, rDiags := c.relevantResourceAttrsForPlan(config, destroyPlan)
@@ -410,7 +426,7 @@ func (c *Context) prePlanVerifyTargetedMoves(moveResults refactoring.MoveResults
 	var diags tfdiags.Diagnostics
 
 	var excluded []addrs.AbsResourceInstance
-	for _, result := range moveResults.Changes {
+	for _, result := range moveResults.Changes.Values() {
 		fromMatchesTarget := false
 		toMatchesTarget := false
 		for _, targetAddr := range targets {
@@ -500,12 +516,10 @@ func (c *Context) planWalk(config *configs.Config, prevRunState *states.State, o
 	// If we get here then we should definitely have a non-nil "graph", which
 	// we can now walk.
 	changes := plans.NewChanges()
-	conditions := plans.NewConditions()
 	walker, walkDiags := c.walk(graph, walkOp, &graphWalkOpts{
 		Config:      config,
 		InputState:  prevRunState,
 		Changes:     changes,
-		Conditions:  conditions,
 		MoveResults: moveResults,
 	})
 	diags = diags.Append(walker.NonFatalDiagnostics)
@@ -522,7 +536,7 @@ func (c *Context) planWalk(config *configs.Config, prevRunState *states.State, o
 	}
 	diags = diags.Append(moveValidateDiags) // might just contain warnings
 
-	if len(moveResults.Blocked) > 0 && !diags.HasErrors() {
+	if moveResults.Blocked.Len() > 0 && !diags.HasErrors() {
 		// If we had blocked moves and we're not going to be returning errors
 		// then we'll report the blockers as a warning. We do this only in the
 		// absense of errors because invalid move statements might well be
@@ -539,10 +553,10 @@ func (c *Context) planWalk(config *configs.Config, prevRunState *states.State, o
 	plan := &plans.Plan{
 		UIMode:           opts.Mode,
 		Changes:          changes,
-		Conditions:       conditions,
 		DriftedResources: driftedResources,
 		PrevRunState:     prevRunState,
 		PriorState:       priorState,
+		Checks:           states.NewCheckResults(walker.Checks),
 
 		// Other fields get populated by Context.Plan after we return
 	}
@@ -560,6 +574,8 @@ func (c *Context) planGraph(config *configs.Config, prevRunState *states.State, 
 			Targets:            opts.Targets,
 			ForceReplace:       opts.ForceReplace,
 			skipRefresh:        opts.SkipRefresh,
+			preDestroyRefresh:  opts.PreDestroyRefresh,
+			Operation:          walkPlan,
 		}).Build(addrs.RootModuleInstance)
 		return graph, walkPlan, diags
 	case plans.RefreshOnlyMode:
@@ -571,16 +587,18 @@ func (c *Context) planGraph(config *configs.Config, prevRunState *states.State, 
 			Targets:            opts.Targets,
 			skipRefresh:        opts.SkipRefresh,
 			skipPlanChanges:    true, // this activates "refresh only" mode.
+			Operation:          walkPlan,
 		}).Build(addrs.RootModuleInstance)
 		return graph, walkPlan, diags
 	case plans.DestroyMode:
-		graph, diags := (&DestroyPlanGraphBuilder{
+		graph, diags := (&PlanGraphBuilder{
 			Config:             config,
 			State:              prevRunState,
 			RootVariableValues: opts.SetVariables,
 			Plugins:            c.plugins,
 			Targets:            opts.Targets,
 			skipRefresh:        opts.SkipRefresh,
+			Operation:          walkPlanDestroy,
 		}).Build(addrs.RootModuleInstance)
 		return graph, walkPlanDestroy, diags
 	default:
@@ -592,7 +610,7 @@ func (c *Context) planGraph(config *configs.Config, prevRunState *states.State, 
 func (c *Context) driftedResources(config *configs.Config, oldState, newState *states.State, moves refactoring.MoveResults) ([]*plans.ResourceInstanceChangeSrc, tfdiags.Diagnostics) {
 	var diags tfdiags.Diagnostics
 
-	if newState.ManagedResourcesEqual(oldState) && len(moves.Changes) == 0 {
+	if newState.ManagedResourcesEqual(oldState) && moves.Changes.Len() == 0 {
 		// Nothing to do, because we only detect and report drift for managed
 		// resource instances.
 		return nil, diags
@@ -624,7 +642,7 @@ func (c *Context) driftedResources(config *configs.Config, oldState, newState *s
 				// Previous run address defaults to the current address, but
 				// can differ if the resource moved before refreshing
 				prevRunAddr := addr
-				if move, ok := moves.Changes[addr.UniqueKey()]; ok {
+				if move, ok := moves.Changes.GetOk(addr); ok {
 					prevRunAddr = move.From
 				}
 
@@ -749,13 +767,13 @@ func (c *Context) PlanGraphForUI(config *configs.Config, prevRunState *states.St
 }
 
 func blockedMovesWarningDiag(results refactoring.MoveResults) tfdiags.Diagnostic {
-	if len(results.Blocked) < 1 {
+	if results.Blocked.Len() < 1 {
 		// Caller should check first
 		panic("request to render blocked moves warning without any blocked moves")
 	}
 
 	var itemsBuf bytes.Buffer
-	for _, blocked := range results.Blocked {
+	for _, blocked := range results.Blocked.Values() {
 		fmt.Fprintf(&itemsBuf, "\n  - %s could not move to %s", blocked.Actual, blocked.Wanted)
 	}
 

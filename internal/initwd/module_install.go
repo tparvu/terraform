@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/apparentlymart/go-versions/versions"
 	version "github.com/hashicorp/go-version"
+
 	"github.com/hashicorp/terraform-config-inspect/tfconfig"
 	"github.com/hashicorp/terraform/internal/addrs"
 	"github.com/hashicorp/terraform/internal/earlyconfig"
@@ -306,7 +308,7 @@ func (i *ModuleInstaller) installLocalModule(req *earlyconfig.ModuleRequest, key
 func (i *ModuleInstaller) installRegistryModule(ctx context.Context, req *earlyconfig.ModuleRequest, key string, instPath string, addr addrs.ModuleSourceRegistry, manifest modsdir.Manifest, hooks ModuleInstallHooks, fetcher *getmodules.PackageFetcher) (*tfconfig.Module, *version.Version, tfdiags.Diagnostics) {
 	var diags tfdiags.Diagnostics
 
-	hostname := addr.PackageAddr.Host
+	hostname := addr.Package.Host
 	reg := i.reg
 	var resp *response.ModuleVersions
 	var exists bool
@@ -314,7 +316,7 @@ func (i *ModuleInstaller) installRegistryModule(ctx context.Context, req *earlyc
 	// A registry entry isn't _really_ a module package, but we'll pretend it's
 	// one for the sake of this reporting by just trimming off any source
 	// directory.
-	packageAddr := addr.PackageAddr
+	packageAddr := addr.Package
 
 	// Our registry client is still using the legacy model of addresses, so
 	// we'll shim it here for now.
@@ -387,9 +389,45 @@ func (i *ModuleInstaller) installRegistryModule(ctx context.Context, req *earlyc
 
 		// If we've found a pre-release version then we'll ignore it unless
 		// it was exactly requested.
-		if v.Prerelease() != "" && req.VersionConstraints.String() != v.String() {
-			log.Printf("[TRACE] ModuleInstaller: %s ignoring %s because it is a pre-release and was not requested exactly", key, v)
-			continue
+		//
+		// The prerelease checking will be handled by a different library for
+		// 2 reasons. First, this other library automatically includes the
+		// "prerelease versions must be exactly requested" behaviour that we are
+		// looking for. Second, this other library is used to handle all version
+		// constraints for the provider logic and this is the first step to
+		// making the module and provider version logic match.
+		if v.Prerelease() != "" {
+			// At this point all versions published by the module with
+			// prerelease metadata will be checked. Users may not have even
+			// requested this prerelease so don't print lots of unnecessary #
+			// warnings.
+			acceptableVersions, err := versions.MeetingConstraintsString(req.VersionConstraints.String())
+			if err != nil {
+				log.Printf("[WARN] ModuleInstaller: %s ignoring %s because the version constraints (%s) could not be parsed: %s", key, v, req.VersionConstraints.String(), err.Error())
+				continue
+			}
+
+			// Validate the version is also readable by the other versions
+			// library.
+			version, err := versions.ParseVersion(v.String())
+			if err != nil {
+				log.Printf("[WARN] ModuleInstaller: %s ignoring %s because the version (%s) reported by the module could not be parsed: %s", key, v, v.String(), err.Error())
+				continue
+			}
+
+			// Finally, check if the prerelease is acceptable to version. As
+			// highlighted previously, we go through all of this because the
+			// apparentlymart/go-versions library handles prerelease constraints
+			// in the apporach we want to.
+			if !acceptableVersions.Has(version) {
+				log.Printf("[TRACE] ModuleInstaller: %s ignoring %s because it is a pre-release and was not requested exactly", key, v)
+				continue
+			}
+
+			// If we reach here, it means this prerelease version was exactly
+			// requested according to the extra constraints of this library.
+			// We fall through and allow the other library to also validate it
+			// for consistency.
 		}
 
 		if latestVersion == nil || v.GreaterThan(latestVersion) {
@@ -469,9 +507,9 @@ func (i *ModuleInstaller) installRegistryModule(ctx context.Context, req *earlyc
 
 	dlAddr := i.registryPackageSources[moduleAddr]
 
-	log.Printf("[TRACE] ModuleInstaller: %s %s %s is available at %q", key, packageAddr, latestMatch, dlAddr.PackageAddr)
+	log.Printf("[TRACE] ModuleInstaller: %s %s %s is available at %q", key, packageAddr, latestMatch, dlAddr.Package)
 
-	err := fetcher.FetchPackage(ctx, instPath, dlAddr.PackageAddr.String())
+	err := fetcher.FetchPackage(ctx, instPath, dlAddr.Package.String())
 	if errors.Is(err, context.Canceled) {
 		diags = diags.Append(tfdiags.Sourceless(
 			tfdiags.Error,
@@ -494,7 +532,7 @@ func (i *ModuleInstaller) installRegistryModule(ctx context.Context, req *earlyc
 		return nil, nil, diags
 	}
 
-	log.Printf("[TRACE] ModuleInstaller: %s %q was downloaded to %s", key, dlAddr.PackageAddr, instPath)
+	log.Printf("[TRACE] ModuleInstaller: %s %q was downloaded to %s", key, dlAddr.Package, instPath)
 
 	// Incorporate any subdir information from the original path into the
 	// address returned by the registry in order to find the final directory
@@ -540,7 +578,7 @@ func (i *ModuleInstaller) installGoGetterModule(ctx context.Context, req *earlyc
 
 	// Report up to the caller that we're about to start downloading.
 	addr := req.SourceAddr.(addrs.ModuleSourceRemote)
-	packageAddr := addr.PackageAddr
+	packageAddr := addr.Package
 	hooks.Download(key, packageAddr.String(), nil)
 
 	if len(req.VersionConstraints) != 0 {
@@ -587,8 +625,11 @@ func (i *ModuleInstaller) installGoGetterModule(ctx context.Context, req *earlyc
 		return nil, diags
 	}
 
-	subDir := filepath.FromSlash(addr.Subdir)
-	modDir := filepath.Join(instPath, subDir)
+	modDir, err := getmodules.ExpandSubdirGlobs(instPath, addr.Subdir)
+	if err != nil {
+		diags = diags.Append(err)
+		return nil, diags
+	}
 
 	log.Printf("[TRACE] ModuleInstaller: %s %q was downloaded to %s", key, addr, modDir)
 
@@ -758,7 +799,7 @@ func splitAddrSubdir(addr addrs.ModuleSource) (string, string) {
 		addr.Subdir = ""
 		return addr.String(), subDir
 	case addrs.ModuleSourceRemote:
-		return addr.PackageAddr.String(), addr.Subdir
+		return addr.Package.String(), addr.Subdir
 	case nil:
 		panic("splitAddrSubdir on nil addrs.ModuleSource")
 	default:

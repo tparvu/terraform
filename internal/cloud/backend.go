@@ -16,18 +16,18 @@ import (
 	version "github.com/hashicorp/go-version"
 	svchost "github.com/hashicorp/terraform-svchost"
 	"github.com/hashicorp/terraform-svchost/disco"
-	"github.com/mitchellh/cli"
-	"github.com/mitchellh/colorstring"
-	"github.com/zclconf/go-cty/cty"
-	"github.com/zclconf/go-cty/cty/gocty"
-
 	"github.com/hashicorp/terraform/internal/backend"
 	"github.com/hashicorp/terraform/internal/configs/configschema"
 	"github.com/hashicorp/terraform/internal/plans"
+	"github.com/hashicorp/terraform/internal/states/remote"
 	"github.com/hashicorp/terraform/internal/states/statemgr"
 	"github.com/hashicorp/terraform/internal/terraform"
 	"github.com/hashicorp/terraform/internal/tfdiags"
 	tfversion "github.com/hashicorp/terraform/version"
+	"github.com/mitchellh/cli"
+	"github.com/mitchellh/colorstring"
+	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/gocty"
 
 	backendLocal "github.com/hashicorp/terraform/internal/backend/local"
 )
@@ -89,10 +89,6 @@ type Cloud struct {
 	ignoreVersionConflict bool
 
 	runningInAutomation bool
-
-	// input stores the value of the -input flag, since it will be used
-	// to determine whether or not to ask the user for approval of a run.
-	input bool
 }
 
 var _ backend.Backend = (*Cloud)(nil)
@@ -218,24 +214,24 @@ func (b *Cloud) Configure(obj cty.Value) tfdiags.Diagnostics {
 		return diags
 	}
 
-	// First we'll retrieve the token from the configuration
-	var token string
-	if val := obj.GetAttr("token"); !val.IsNull() {
-		token = val.AsString()
+	// Retrieve the token for this host as configured in the credentials
+	// section of the CLI Config File.
+	token, err := b.token()
+	if err != nil {
+		diags = diags.Append(tfdiags.AttributeValue(
+			tfdiags.Error,
+			strings.ToUpper(err.Error()[:1])+err.Error()[1:],
+			"", // no description is needed here, the error is clear
+			cty.Path{cty.GetAttrStep{Name: "hostname"}},
+		))
+		return diags
 	}
 
-	// Get the token from the CLI Config File in the credentials section
-	// if no token was not set in the configuration
+	// Get the token from the config if no token was configured for this
+	// host in credentials section of the CLI Config File.
 	if token == "" {
-		token, err = b.token()
-		if err != nil {
-			diags = diags.Append(tfdiags.AttributeValue(
-				tfdiags.Error,
-				strings.ToUpper(err.Error()[:1])+err.Error()[1:],
-				"", // no description is needed here, the error is clear
-				cty.Path{cty.GetAttrStep{Name: "hostname"}},
-			))
-			return diags
+		if val := obj.GetAttr("token"); !val.IsNull() {
+			token = val.AsString()
 		}
 	}
 
@@ -526,10 +522,15 @@ func (b *Cloud) DeleteWorkspace(name string) error {
 	}
 
 	// Configure the remote workspace name.
-	State := &State{tfeClient: b.client, organization: b.organization, workspace: &tfe.Workspace{
-		Name: name,
-	}}
-	return State.Delete()
+	client := &remoteClient{
+		client:       b.client,
+		organization: b.organization,
+		workspace: &tfe.Workspace{
+			Name: name,
+		},
+	}
+
+	return client.Delete()
 }
 
 // StateMgr implements backend.Enhanced.
@@ -614,7 +615,16 @@ func (b *Cloud) StateMgr(name string) (statemgr.Full, error) {
 		}
 	}
 
-	return &State{tfeClient: b.client, organization: b.organization, workspace: workspace}, nil
+	client := &remoteClient{
+		client:       b.client,
+		organization: b.organization,
+		workspace:    workspace,
+
+		// This is optionally set during Terraform Enterprise runs.
+		runID: os.Getenv("TFE_RUN_ID"),
+	}
+
+	return &remote.State{Client: client}, nil
 }
 
 // Operation implements backend.Enhanced.
@@ -851,12 +861,12 @@ func (b *Cloud) VerifyWorkspaceTerraformVersion(workspaceName string) tfdiags.Di
 	// operator other than simple equality.
 	if remoteVersion != nil && remoteVersion.Prerelease() == "" {
 		v014 := version.Must(version.NewSemver("0.14.0"))
-		v130 := version.Must(version.NewSemver("1.3.0"))
+		v120 := version.Must(version.NewSemver("1.2.0"))
 
 		// Versions from 0.14 through the early 1.x series should be compatible
-		// (though we don't know about 1.3 yet).
-		if remoteVersion.GreaterThanOrEqual(v014) && remoteVersion.LessThan(v130) {
-			early1xCompatible, err := version.NewConstraint(fmt.Sprintf(">= 0.14.0, < %s", v130.String()))
+		// (though we don't know about 1.2 yet).
+		if remoteVersion.GreaterThanOrEqual(v014) && remoteVersion.LessThan(v120) {
+			early1xCompatible, err := version.NewConstraint(fmt.Sprintf(">= 0.14.0, < %s", v120.String()))
 			if err != nil {
 				panic(err)
 			}
@@ -865,7 +875,7 @@ func (b *Cloud) VerifyWorkspaceTerraformVersion(workspaceName string) tfdiags.Di
 
 		// Any future new state format will require at least a minor version
 		// increment, so x.y.* will always be compatible with each other.
-		if remoteVersion.GreaterThanOrEqual(v130) {
+		if remoteVersion.GreaterThanOrEqual(v120) {
 			rwvs := remoteVersion.Segments64()
 			if len(rwvs) >= 3 {
 				// ~> x.y.0
@@ -906,7 +916,6 @@ func (b *Cloud) IsLocalOperations() bool {
 // as a helper to wrap any potentially colored strings.
 //
 // TODO SvH: Rename this back to Colorize as soon as we can pass -no-color.
-//
 //lint:ignore U1000 see above todo
 func (b *Cloud) cliColorize() *colorstring.Colorize {
 	if b.CLIColor != nil {

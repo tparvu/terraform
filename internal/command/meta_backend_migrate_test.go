@@ -1,6 +1,7 @@
 package command
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -36,7 +37,7 @@ func TestBackendMigrate_promptMultiStatePattern(t *testing.T) {
 		},
 	}
 	for name, tc := range cases {
-		t.Log("Test: ", name)
+		fmt.Println("Test: ", name)
 		m := testMetaBackend(t, nil)
 		input := map[string]string{}
 		cleanup := testInputMap(t, input)

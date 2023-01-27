@@ -1,7 +1,6 @@
 package configload
 
 import (
-	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -70,26 +69,6 @@ module "child_b" {
 		t.Errorf("wrong root module snapshot\ngot: %swant: %s", spew.Sdump(gotRoot), spew.Sdump(wantRoot))
 	}
 
-}
-
-func TestLoadConfigWithSnapshot_invalidSource(t *testing.T) {
-	fixtureDir := filepath.Clean("testdata/already-installed-now-invalid")
-
-	old, _ := os.Getwd()
-	os.Chdir(fixtureDir)
-	defer os.Chdir(old)
-
-	loader, err := NewLoader(&Config{
-		ModulesDir: ".terraform/modules",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error from NewLoader: %s", err)
-	}
-
-	_, _, diags := loader.LoadConfigWithSnapshot(".")
-	if !diags.HasErrors() {
-		t.Error("LoadConfigWithSnapshot succeeded; want errors")
-	}
 }
 
 func TestSnapshotRoundtrip(t *testing.T) {

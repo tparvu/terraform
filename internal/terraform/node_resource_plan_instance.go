@@ -83,11 +83,11 @@ func (n *NodePlannableResourceInstance) dataResourceExecute(ctx EvalContext) (di
 	}
 
 	checkRuleSeverity := tfdiags.Error
-	if n.skipPlanChanges || n.preDestroyRefresh {
+	if n.skipPlanChanges {
 		checkRuleSeverity = tfdiags.Warning
 	}
 
-	change, state, repeatData, planDiags := n.planDataSource(ctx, checkRuleSeverity, n.skipPlanChanges)
+	change, state, repeatData, planDiags := n.planDataSource(ctx, checkRuleSeverity)
 	diags = diags.Append(planDiags)
 	if diags.HasErrors() {
 		return diags
@@ -127,11 +127,6 @@ func (n *NodePlannableResourceInstance) managedResourceExecute(ctx EvalContext) 
 
 	var change *plans.ResourceInstanceChange
 	var instanceRefreshState *states.ResourceInstanceObject
-
-	checkRuleSeverity := tfdiags.Error
-	if n.skipPlanChanges || n.preDestroyRefresh {
-		checkRuleSeverity = tfdiags.Warning
-	}
 
 	_, providerSchema, err := getProvider(ctx, n.ResolvedProvider)
 	diags = diags.Append(err)
@@ -285,7 +280,7 @@ func (n *NodePlannableResourceInstance) managedResourceExecute(ctx EvalContext) 
 			addrs.ResourcePostcondition,
 			n.Config.Postconditions,
 			ctx, n.ResourceInstanceAddr(), repeatData,
-			checkRuleSeverity,
+			tfdiags.Error,
 		)
 		diags = diags.Append(checkDiags)
 	} else {
@@ -303,7 +298,7 @@ func (n *NodePlannableResourceInstance) managedResourceExecute(ctx EvalContext) 
 			addrs.ResourcePrecondition,
 			n.Config.Preconditions,
 			ctx, addr, repeatData,
-			checkRuleSeverity,
+			tfdiags.Warning,
 		)
 		diags = diags.Append(checkDiags)
 
@@ -326,7 +321,7 @@ func (n *NodePlannableResourceInstance) managedResourceExecute(ctx EvalContext) 
 			addrs.ResourcePostcondition,
 			n.Config.Postconditions,
 			ctx, addr, repeatData,
-			checkRuleSeverity,
+			tfdiags.Warning,
 		)
 		diags = diags.Append(checkDiags)
 	}
@@ -395,14 +390,6 @@ func depsEqual(a, b []addrs.ConfigResource) bool {
 	if len(a) != len(b) {
 		return false
 	}
-
-	// Because we need to sort the deps to compare equality, make shallow
-	// copies to prevent concurrently modifying the array values on
-	// dependencies shared between expanded instances.
-	copyA, copyB := make([]addrs.ConfigResource, len(a)), make([]addrs.ConfigResource, len(b))
-	copy(copyA, a)
-	copy(copyB, b)
-	a, b = copyA, copyB
 
 	less := func(s []addrs.ConfigResource) func(i, j int) bool {
 		return func(i, j int) bool {

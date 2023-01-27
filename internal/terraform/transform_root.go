@@ -15,21 +15,11 @@ func (t *RootTransformer) Transform(g *Graph) error {
 		return nil
 	}
 
-	// We intentionally add a graphNodeRoot value -- rather than a pointer to
-	// one -- so that all root nodes will coalesce together if two graphs
-	// are merged. Each distinct node value can only be in a graph once,
-	// so adding another graphNodeRoot value to the same graph later will
-	// be a no-op and all of the edges from root nodes will coalesce together
-	// under Graph.Subsume.
-	//
-	// It's important to retain this coalescing guarantee under future
-	// maintenence.
+	// Add a root
 	var root graphNodeRoot
 	g.Add(root)
 
-	// We initially make the root node depend on every node except itself.
-	// If the caller subsequently runs transitive reduction on the graph then
-	// it's typical for some of these edges to then be removed.
+	// Connect the root to all the edges that need it
 	for _, v := range g.Vertices() {
 		if v == root {
 			continue

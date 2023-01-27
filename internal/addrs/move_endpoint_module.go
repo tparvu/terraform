@@ -5,9 +5,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/zclconf/go-cty/cty"
-
 	"github.com/hashicorp/terraform/internal/tfdiags"
+	"github.com/zclconf/go-cty/cty"
 )
 
 // anyKeyImpl is the InstanceKey representation indicating a wildcard, which
@@ -180,7 +179,8 @@ func (e *MoveEndpointInModule) InModuleInstance(modInst ModuleInstance) AbsMovea
 // while selecting a particular object to move.
 //
 // This is a rather special-purpose function here mainly to support our
-// validation rule that a module can only traverse down into child modules.
+// validation rule that a module can only traverse down into child modules
+// that belong to the same module package.
 func (e *MoveEndpointInModule) ModuleCallTraversals() (Module, []ModuleCall) {
 	// We're returning []ModuleCall rather than Module here to make it clearer
 	// that this is a relative sequence of calls rather than an absolute

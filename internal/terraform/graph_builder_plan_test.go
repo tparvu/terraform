@@ -34,9 +34,8 @@ func TestPlanGraphBuilder(t *testing.T) {
 	}, nil)
 
 	b := &PlanGraphBuilder{
-		Config:    testModule(t, "graph-builder-plan-basic"),
-		Plugins:   plugins,
-		Operation: walkPlan,
+		Config:  testModule(t, "graph-builder-plan-basic"),
+		Plugins: plugins,
 	}
 
 	g, err := b.Build(addrs.RootModuleInstance)
@@ -77,9 +76,8 @@ func TestPlanGraphBuilder_dynamicBlock(t *testing.T) {
 	}, nil)
 
 	b := &PlanGraphBuilder{
-		Config:    testModule(t, "graph-builder-plan-dynblock"),
-		Plugins:   plugins,
-		Operation: walkPlan,
+		Config:  testModule(t, "graph-builder-plan-dynblock"),
+		Plugins: plugins,
 	}
 
 	g, err := b.Build(addrs.RootModuleInstance)
@@ -133,9 +131,8 @@ func TestPlanGraphBuilder_attrAsBlocks(t *testing.T) {
 	}, nil)
 
 	b := &PlanGraphBuilder{
-		Config:    testModule(t, "graph-builder-plan-attr-as-blocks"),
-		Plugins:   plugins,
-		Operation: walkPlan,
+		Config:  testModule(t, "graph-builder-plan-attr-as-blocks"),
+		Plugins: plugins,
 	}
 
 	g, err := b.Build(addrs.RootModuleInstance)
@@ -176,7 +173,6 @@ func TestPlanGraphBuilder_targetModule(t *testing.T) {
 		Targets: []addrs.Targetable{
 			addrs.RootModuleInstance.Child("child2", addrs.NoKey),
 		},
-		Operation: walkPlan,
 	}
 
 	g, err := b.Build(addrs.RootModuleInstance)
@@ -198,9 +194,8 @@ func TestPlanGraphBuilder_forEach(t *testing.T) {
 	}, nil)
 
 	b := &PlanGraphBuilder{
-		Config:    testModule(t, "plan-for-each"),
-		Plugins:   plugins,
-		Operation: walkPlan,
+		Config:  testModule(t, "plan-for-each"),
+		Plugins: plugins,
 	}
 
 	g, err := b.Build(addrs.RootModuleInstance)
@@ -233,7 +228,7 @@ local.instance_id (expand)
   aws_instance.web (expand)
 openstack_floating_ip.random (expand)
   provider["registry.terraform.io/hashicorp/openstack"]
-output.instance_id (expand)
+output.instance_id
   local.instance_id (expand)
 provider["registry.terraform.io/hashicorp/aws"]
   openstack_floating_ip.random (expand)
@@ -243,7 +238,7 @@ provider["registry.terraform.io/hashicorp/openstack"]
 provider["registry.terraform.io/hashicorp/openstack"] (close)
   openstack_floating_ip.random (expand)
 root
-  output.instance_id (expand)
+  output.instance_id
   provider["registry.terraform.io/hashicorp/aws"] (close)
   provider["registry.terraform.io/hashicorp/openstack"] (close)
 var.foo

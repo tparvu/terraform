@@ -100,8 +100,6 @@ func initCommands(
 		ProviderSource:       providerSrc,
 		ProviderDevOverrides: providerDevOverrides,
 		UnmanagedProviders:   unmanagedProviders,
-
-		AllowExperimentalFeatures: ExperimentsAllowed(),
 	}
 
 	// The command list is included in the terraform -help

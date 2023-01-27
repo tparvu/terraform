@@ -57,7 +57,7 @@ func marshalPlannedOutputs(changes *plans.Changes) (map[string]output, error) {
 			continue
 		}
 
-		var after, afterType []byte
+		var after []byte
 		changeV, err := oc.Decode()
 		if err != nil {
 			return ret, err
@@ -68,12 +68,7 @@ func marshalPlannedOutputs(changes *plans.Changes) (map[string]output, error) {
 		changeV.After, _ = changeV.After.UnmarkDeep()
 
 		if changeV.After != cty.NilVal && changeV.After.IsWhollyKnown() {
-			ty := changeV.After.Type()
-			after, err = ctyjson.Marshal(changeV.After, ty)
-			if err != nil {
-				return ret, err
-			}
-			afterType, err = ctyjson.MarshalType(ty)
+			after, err = ctyjson.Marshal(changeV.After, changeV.After.Type())
 			if err != nil {
 				return ret, err
 			}
@@ -81,7 +76,6 @@ func marshalPlannedOutputs(changes *plans.Changes) (map[string]output, error) {
 
 		ret[oc.Addr.OutputValue.Name] = output{
 			Value:     json.RawMessage(after),
-			Type:      json.RawMessage(afterType),
 			Sensitive: oc.Sensitive,
 		}
 	}

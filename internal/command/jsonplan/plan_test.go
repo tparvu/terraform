@@ -66,18 +66,6 @@ func TestOmitUnknowns(t *testing.T) {
 			}),
 		},
 		{
-			cty.TupleVal([]cty.Value{
-				cty.StringVal("alpha"),
-				cty.UnknownVal(cty.String),
-				cty.StringVal("charlie"),
-			}),
-			cty.TupleVal([]cty.Value{
-				cty.StringVal("alpha"),
-				cty.NullVal(cty.String),
-				cty.StringVal("charlie"),
-			}),
-		},
-		{
 			cty.SetVal([]cty.Value{
 				cty.StringVal("dev"),
 				cty.StringVal("foo"),
@@ -88,7 +76,6 @@ func TestOmitUnknowns(t *testing.T) {
 				cty.StringVal("dev"),
 				cty.StringVal("foo"),
 				cty.StringVal("stg"),
-				cty.NullVal(cty.String),
 			}),
 		},
 		{

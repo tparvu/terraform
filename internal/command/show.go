@@ -110,8 +110,20 @@ func (c *ShowCommand) show(path string) (*plans.Plan, *statefile.File, *configs.
 
 	// Get schemas, if possible
 	if config != nil || stateFile != nil {
-		schemas, diags = c.MaybeGetSchemas(stateFile.State, config)
-		if diags.HasErrors() {
+		opts, err := c.contextOpts()
+		if err != nil {
+			diags = diags.Append(err)
+			return plan, stateFile, config, schemas, diags
+		}
+		tfCtx, ctxDiags := terraform.NewContext(opts)
+		diags = diags.Append(ctxDiags)
+		if ctxDiags.HasErrors() {
+			return plan, stateFile, config, schemas, diags
+		}
+		var schemaDiags tfdiags.Diagnostics
+		schemas, schemaDiags = tfCtx.Schemas(config, stateFile.State)
+		diags = diags.Append(schemaDiags)
+		if schemaDiags.HasErrors() {
 			return plan, stateFile, config, schemas, diags
 		}
 	}
@@ -139,7 +151,7 @@ func (c *ShowCommand) showFromLatestStateSnapshot() (*statefile.File, tfdiags.Di
 	// Get the latest state snapshot from the backend for the current workspace
 	stateFile, stateErr := getStateFromBackend(b, workspace)
 	if stateErr != nil {
-		diags = diags.Append(stateErr)
+		diags = diags.Append(stateErr.Error())
 		return nil, diags
 	}
 

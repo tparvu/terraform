@@ -19,7 +19,6 @@ func TestState_impl(t *testing.T) {
 	var _ statemgr.Writer = new(State)
 	var _ statemgr.Persister = new(State)
 	var _ statemgr.Refresher = new(State)
-	var _ statemgr.OutputReader = new(State)
 	var _ statemgr.Locker = new(State)
 }
 
@@ -37,7 +36,7 @@ func TestStateRace(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			s.WriteState(current)
-			s.PersistState(nil)
+			s.PersistState()
 			s.RefreshState()
 		}()
 	}
@@ -104,7 +103,6 @@ func TestStatePersist(t *testing.T) {
 					"terraform_version": version.Version,
 					"outputs":           map[string]interface{}{},
 					"resources":         []interface{}{},
-					"check_results":     nil,
 				},
 			},
 		},
@@ -126,7 +124,6 @@ func TestStatePersist(t *testing.T) {
 					"terraform_version": version.Version,
 					"outputs":           map[string]interface{}{},
 					"resources":         []interface{}{},
-					"check_results":     nil,
 				},
 			},
 		},
@@ -150,8 +147,7 @@ func TestStatePersist(t *testing.T) {
 							"value": "bar",
 						},
 					},
-					"resources":     []interface{}{},
-					"check_results": nil,
+					"resources": []interface{}{},
 				},
 			},
 		},
@@ -175,8 +171,7 @@ func TestStatePersist(t *testing.T) {
 							"value": "baz",
 						},
 					},
-					"resources":     []interface{}{},
-					"check_results": nil,
+					"resources": []interface{}{},
 				},
 			},
 		},
@@ -207,8 +202,7 @@ func TestStatePersist(t *testing.T) {
 							"value": "baz",
 						},
 					},
-					"resources":     []interface{}{},
-					"check_results": nil,
+					"resources": []interface{}{},
 				},
 			},
 		},
@@ -251,61 +245,32 @@ func TestStatePersist(t *testing.T) {
 
 	// Run tests in order.
 	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			s, cleanup := tc.mutationFunc(mgr)
+		s, cleanup := tc.mutationFunc(mgr)
 
-			if err := mgr.WriteState(s); err != nil {
-				t.Fatalf("failed to WriteState for %q: %s", tc.name, err)
-			}
-			if err := mgr.PersistState(nil); err != nil {
-				t.Fatalf("failed to PersistState for %q: %s", tc.name, err)
-			}
+		if err := mgr.WriteState(s); err != nil {
+			t.Fatalf("failed to WriteState for %q: %s", tc.name, err)
+		}
+		if err := mgr.PersistState(); err != nil {
+			t.Fatalf("failed to PersistState for %q: %s", tc.name, err)
+		}
 
-			if tc.isRequested(t) {
-				// Get captured request from the mock client log
-				// based on the index of the current test
-				if logIdx >= len(mockClient.log) {
-					t.Fatalf("request lock and index are out of sync on %q: idx=%d len=%d", tc.name, logIdx, len(mockClient.log))
-				}
-				loggedRequest := mockClient.log[logIdx]
-				logIdx++
-				if diff := cmp.Diff(tc.expectedRequest, loggedRequest); len(diff) > 0 {
-					t.Fatalf("incorrect client requests for %q:\n%s", tc.name, diff)
-				}
+		if tc.isRequested(t) {
+			// Get captured request from the mock client log
+			// based on the index of the current test
+			if logIdx >= len(mockClient.log) {
+				t.Fatalf("request lock and index are out of sync on %q: idx=%d len=%d", tc.name, logIdx, len(mockClient.log))
 			}
-			cleanup()
-		})
+			loggedRequest := mockClient.log[logIdx]
+			logIdx++
+			if diff := cmp.Diff(tc.expectedRequest, loggedRequest); len(diff) > 0 {
+				t.Fatalf("incorrect client requests for %q:\n%s", tc.name, diff)
+			}
+		}
+		cleanup()
 	}
 	logCnt := len(mockClient.log)
 	if logIdx != logCnt {
 		log.Fatalf("not all requests were read. Expected logIdx to be %d but got %d", logCnt, logIdx)
-	}
-}
-
-func TestState_GetRootOutputValues(t *testing.T) {
-	// Initial setup of state with outputs already defined
-	mgr := &State{
-		Client: &mockClient{
-			current: []byte(`
-				{
-					"version": 4,
-					"lineage": "mock-lineage",
-					"serial": 1,
-					"terraform_version":"0.0.0",
-					"outputs": {"foo": {"value":"bar", "type": "string"}},
-					"resources": []
-				}
-			`),
-		},
-	}
-
-	outputs, err := mgr.GetRootOutputValues()
-	if err != nil {
-		t.Errorf("Expected GetRootOutputValues to not return an error, but it returned %v", err)
-	}
-
-	if len(outputs) != 1 {
-		t.Errorf("Expected %d outputs, but received %d", 1, len(outputs))
 	}
 }
 
@@ -384,7 +349,6 @@ func TestWriteStateForMigration(t *testing.T) {
 					"terraform_version": version.Version,
 					"outputs":           map[string]interface{}{"foo": map[string]interface{}{"type": string("string"), "value": string("bar")}},
 					"resources":         []interface{}{},
-					"check_results":     nil,
 				},
 			},
 			force: true,
@@ -403,7 +367,6 @@ func TestWriteStateForMigration(t *testing.T) {
 					"terraform_version": version.Version,
 					"outputs":           map[string]interface{}{"foo": map[string]interface{}{"type": string("string"), "value": string("bar")}},
 					"resources":         []interface{}{},
-					"check_results":     nil,
 				},
 			},
 			force: true,
@@ -432,39 +395,37 @@ func TestWriteStateForMigration(t *testing.T) {
 	logIdx := 0
 
 	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			sf := tc.stateFile(mgr)
-			err := mgr.WriteStateForMigration(sf, tc.force)
-			shouldError := tc.expectedError != ""
+		sf := tc.stateFile(mgr)
+		err := mgr.WriteStateForMigration(sf, tc.force)
+		shouldError := tc.expectedError != ""
 
-			// If we are expecting and error check it and move on
-			if shouldError {
-				if err == nil {
-					t.Fatalf("test case %q should have failed with error %q", tc.name, tc.expectedError)
-				} else if err.Error() != tc.expectedError {
-					t.Fatalf("test case %q expected error %q but got %q", tc.name, tc.expectedError, err)
-				}
-				return
+		// If we are expecting and error check it and move on
+		if shouldError {
+			if err == nil {
+				t.Fatalf("test case %q should have failed with error %q", tc.name, tc.expectedError)
+			} else if err.Error() != tc.expectedError {
+				t.Fatalf("test case %q expected error %q but got %q", tc.name, tc.expectedError, err)
 			}
+			continue
+		}
 
-			if err != nil {
-				t.Fatalf("test case %q failed: %v", tc.name, err)
-			}
+		if err != nil {
+			t.Fatalf("test case %q failed: %v", tc.name, err)
+		}
 
-			// At this point we should just do a normal write and persist
-			// as would happen from the CLI
-			mgr.WriteState(mgr.State())
-			mgr.PersistState(nil)
+		// At this point we should just do a normal write and persist
+		// as would happen from the CLI
+		mgr.WriteState(mgr.State())
+		mgr.PersistState()
 
-			if logIdx >= len(mockClient.log) {
-				t.Fatalf("request lock and index are out of sync on %q: idx=%d len=%d", tc.name, logIdx, len(mockClient.log))
-			}
-			loggedRequest := mockClient.log[logIdx]
-			logIdx++
-			if diff := cmp.Diff(tc.expectedRequest, loggedRequest); len(diff) > 0 {
-				t.Fatalf("incorrect client requests for %q:\n%s", tc.name, diff)
-			}
-		})
+		if logIdx >= len(mockClient.log) {
+			t.Fatalf("request lock and index are out of sync on %q: idx=%d len=%d", tc.name, logIdx, len(mockClient.log))
+		}
+		loggedRequest := mockClient.log[logIdx]
+		logIdx++
+		if diff := cmp.Diff(tc.expectedRequest, loggedRequest); len(diff) > 0 {
+			t.Fatalf("incorrect client requests for %q:\n%s", tc.name, diff)
+		}
 	}
 
 	logCnt := len(mockClient.log)
@@ -540,7 +501,6 @@ func TestWriteStateForMigrationWithForcePushClient(t *testing.T) {
 					"terraform_version": version.Version,
 					"outputs":           map[string]interface{}{"foo": map[string]interface{}{"type": string("string"), "value": string("bar")}},
 					"resources":         []interface{}{},
-					"check_results":     nil,
 				},
 			},
 			force: true,
@@ -559,7 +519,6 @@ func TestWriteStateForMigrationWithForcePushClient(t *testing.T) {
 					"terraform_version": version.Version,
 					"outputs":           map[string]interface{}{"foo": map[string]interface{}{"type": string("string"), "value": string("bar")}},
 					"resources":         []interface{}{},
-					"check_results":     nil,
 				},
 			},
 			force: true,
@@ -592,45 +551,43 @@ func TestWriteStateForMigrationWithForcePushClient(t *testing.T) {
 	logIdx := 0
 
 	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Always reset client to not be force pushing
-			mockClient.force = false
-			sf := tc.stateFile(mgr)
-			err := mgr.WriteStateForMigration(sf, tc.force)
-			shouldError := tc.expectedError != ""
+		// Always reset client to not be force pushing
+		mockClient.force = false
+		sf := tc.stateFile(mgr)
+		err := mgr.WriteStateForMigration(sf, tc.force)
+		shouldError := tc.expectedError != ""
 
-			// If we are expecting and error check it and move on
-			if shouldError {
-				if err == nil {
-					t.Fatalf("test case %q should have failed with error %q", tc.name, tc.expectedError)
-				} else if err.Error() != tc.expectedError {
-					t.Fatalf("test case %q expected error %q but got %q", tc.name, tc.expectedError, err)
-				}
-				return
+		// If we are expecting and error check it and move on
+		if shouldError {
+			if err == nil {
+				t.Fatalf("test case %q should have failed with error %q", tc.name, tc.expectedError)
+			} else if err.Error() != tc.expectedError {
+				t.Fatalf("test case %q expected error %q but got %q", tc.name, tc.expectedError, err)
 			}
+			continue
+		}
 
-			if err != nil {
-				t.Fatalf("test case %q failed: %v", tc.name, err)
-			}
+		if err != nil {
+			t.Fatalf("test case %q failed: %v", tc.name, err)
+		}
 
-			if tc.force && !mockClient.force {
-				t.Fatalf("test case %q should have enabled force push", tc.name)
-			}
+		if tc.force && !mockClient.force {
+			t.Fatalf("test case %q should have enabled force push", tc.name)
+		}
 
-			// At this point we should just do a normal write and persist
-			// as would happen from the CLI
-			mgr.WriteState(mgr.State())
-			mgr.PersistState(nil)
+		// At this point we should just do a normal write and persist
+		// as would happen from the CLI
+		mgr.WriteState(mgr.State())
+		mgr.PersistState()
 
-			if logIdx >= len(mockClient.log) {
-				t.Fatalf("request lock and index are out of sync on %q: idx=%d len=%d", tc.name, logIdx, len(mockClient.log))
-			}
-			loggedRequest := mockClient.log[logIdx]
-			logIdx++
-			if diff := cmp.Diff(tc.expectedRequest, loggedRequest); len(diff) > 0 {
-				t.Fatalf("incorrect client requests for %q:\n%s", tc.name, diff)
-			}
-		})
+		if logIdx >= len(mockClient.log) {
+			t.Fatalf("request lock and index are out of sync on %q: idx=%d len=%d", tc.name, logIdx, len(mockClient.log))
+		}
+		loggedRequest := mockClient.log[logIdx]
+		logIdx++
+		if diff := cmp.Diff(tc.expectedRequest, loggedRequest); len(diff) > 0 {
+			t.Fatalf("incorrect client requests for %q:\n%s", tc.name, diff)
+		}
 	}
 
 	logCnt := len(mockClient.log)

@@ -121,9 +121,6 @@ func TestNodeAbstractResource_ReadResourceInstanceState(t *testing.T) {
 			},
 		},
 	})
-	// This test does not configure the provider, but the mock provider will
-	// check that this was called and report errors.
-	mockProvider.ConfigureProviderCalled = true
 
 	tests := map[string]struct {
 		State              *states.State
@@ -161,7 +158,6 @@ func TestNodeAbstractResource_ReadResourceInstanceState(t *testing.T) {
 			ctx.StateState = test.State.SyncWrapper()
 			ctx.PathPath = addrs.RootModuleInstance
 			ctx.ProviderSchemaSchema = mockProvider.ProviderSchema()
-
 			ctx.ProviderProvider = providers.Interface(mockProvider)
 
 			got, readDiags := test.Node.readResourceInstanceState(ctx, test.Node.Addr.Resource.Instance(addrs.NoKey).Absolute(addrs.RootModuleInstance))
@@ -187,9 +183,6 @@ func TestNodeAbstractResource_ReadResourceInstanceStateDeposed(t *testing.T) {
 			},
 		},
 	})
-	// This test does not configure the provider, but the mock provider will
-	// check that this was called and report errors.
-	mockProvider.ConfigureProviderCalled = true
 
 	tests := map[string]struct {
 		State              *states.State

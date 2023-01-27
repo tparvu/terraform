@@ -33,22 +33,11 @@ func (m Module) String() string {
 	if len(m) == 0 {
 		return ""
 	}
-	// Calculate necessary space.
-	l := 0
-	for _, step := range m {
-		l += len(step)
+	var steps []string
+	for _, s := range m {
+		steps = append(steps, "module", s)
 	}
-	buf := strings.Builder{}
-	// 8 is len(".module.") which separates entries.
-	buf.Grow(l + len(m)*8)
-	sep := ""
-	for _, step := range m {
-		buf.WriteString(sep)
-		buf.WriteString("module.")
-		buf.WriteString(step)
-		sep = "."
-	}
-	return buf.String()
+	return strings.Join(steps, ".")
 }
 
 func (m Module) Equal(other Module) bool {

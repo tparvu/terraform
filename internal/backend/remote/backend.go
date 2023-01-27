@@ -256,25 +256,24 @@ func (b *Remote) Configure(obj cty.Value) tfdiags.Diagnostics {
 		return diags
 	}
 
-	// Get the token from the config.
-	var token string
-	if val := obj.GetAttr("token"); !val.IsNull() {
-		token = val.AsString()
+	// Retrieve the token for this host as configured in the credentials
+	// section of the CLI Config File.
+	token, err := b.token()
+	if err != nil {
+		diags = diags.Append(tfdiags.AttributeValue(
+			tfdiags.Error,
+			strings.ToUpper(err.Error()[:1])+err.Error()[1:],
+			"", // no description is needed here, the error is clear
+			cty.Path{cty.GetAttrStep{Name: "hostname"}},
+		))
+		return diags
 	}
 
-	// Retrieve the token for this host as configured in the credentials
-	// section of the CLI Config File if no token was configured for this
-	// host in the config.
+	// Get the token from the config if no token was configured for this
+	// host in credentials section of the CLI Config File.
 	if token == "" {
-		token, err = b.token()
-		if err != nil {
-			diags = diags.Append(tfdiags.AttributeValue(
-				tfdiags.Error,
-				strings.ToUpper(err.Error()[:1])+err.Error()[1:],
-				"", // no description is needed here, the error is clear
-				cty.Path{cty.GetAttrStep{Name: "hostname"}},
-			))
-			return diags
+		if val := obj.GetAttr("token"); !val.IsNull() {
+			token = val.AsString()
 		}
 	}
 
@@ -939,9 +938,9 @@ func (b *Remote) VerifyWorkspaceTerraformVersion(workspaceName string) tfdiags.D
 		// are aware of are:
 		//
 		// - 0.14.0 is guaranteed to be compatible with versions up to but not
-		//   including 1.3.0
-		v130 := version.Must(version.NewSemver("1.3.0"))
-		if tfversion.SemVer.LessThan(v130) && remoteVersion.LessThan(v130) {
+		//   including 1.2.0
+		v120 := version.Must(version.NewSemver("1.2.0"))
+		if tfversion.SemVer.LessThan(v120) && remoteVersion.LessThan(v120) {
 			return diags
 		}
 		// - Any new Terraform state version will require at least minor patch

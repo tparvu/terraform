@@ -176,7 +176,7 @@ func (d *evaluationStateData) GetForEachAttr(addr addrs.ForEachAttr, rng tfdiags
 			diags = diags.Append(&hcl.Diagnostic{
 				Severity: hcl.DiagError,
 				Summary:  `each.value cannot be used in this context`,
-				Detail:   `A reference to "each.value" has been used in a context in which it is unavailable, such as when the configuration no longer contains the value in its "for_each" expression. Remove this reference to each.value in your configuration to work around this error.`,
+				Detail:   `A reference to "each.value" has been used in a context in which it unavailable, such as when the configuration no longer contains the value in its "for_each" expression. Remove this reference to each.value in your configuration to work around this error.`,
 				Subject:  rng.ToHCL().Ptr(),
 			})
 			return cty.UnknownVal(cty.DynamicPseudoType), diags
@@ -695,29 +695,6 @@ func (d *evaluationStateData) GetResource(addr addrs.Resource, rng tfdiags.Sourc
 				return cty.DynamicVal, diags
 			}
 
-		case walkImport:
-			// Import does not yet plan resource changes, so new resources from
-			// config are not going to be found here. Once walkImport fully
-			// plans resources, this case should not longer be needed.
-			// In the single instance case, we can return a typed unknown value
-			// for the instance to better satisfy other expressions using the
-			// value. This of course will not help if statically known
-			// attributes are expected to be known elsewhere, but reduces the
-			// number of problematic configs for now.
-			// Unlike in plan and apply above we can't be sure the count or
-			// for_each instances are empty, so we return a DynamicVal. We
-			// don't really have a good value to return otherwise -- empty
-			// values will fail for direct index expressions, and unknown
-			// Lists and Maps could fail in some type unifications.
-			switch {
-			case config.Count != nil:
-				return cty.DynamicVal, diags
-			case config.ForEach != nil:
-				return cty.DynamicVal, diags
-			default:
-				return cty.UnknownVal(ty), diags
-			}
-
 		default:
 			// We should only end up here during the validate walk,
 			// since later walks should have at least partial states populated
@@ -728,7 +705,7 @@ func (d *evaluationStateData) GetResource(addr addrs.Resource, rng tfdiags.Sourc
 
 	// Decode all instances in the current state
 	instances := map[addrs.InstanceKey]cty.Value{}
-	pendingDestroy := d.Operation == walkDestroy
+	pendingDestroy := d.Evaluator.Changes.IsFullDestroy()
 	for key, is := range rs.Instances {
 		if is == nil || is.Current == nil {
 			// Assume we're dealing with an instance that hasn't been created yet.

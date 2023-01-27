@@ -26,7 +26,10 @@ import (
 // ApplyMoves expects exclusive access to the given state while it's running.
 // Don't read or write any part of the state structure until ApplyMoves returns.
 func ApplyMoves(stmts []MoveStatement, state *states.State) MoveResults {
-	ret := makeMoveResults()
+	ret := MoveResults{
+		Changes: make(map[addrs.UniqueKey]MoveSuccess),
+		Blocked: make(map[addrs.UniqueKey]MoveBlocked),
+	}
 
 	if len(stmts) == 0 {
 		return ret
@@ -68,26 +71,28 @@ func ApplyMoves(stmts []MoveStatement, state *states.State) MoveResults {
 	log.Printf("[TRACE] refactoring.ApplyMoves: Processing 'moved' statements in the configuration\n%s", logging.Indent(g.String()))
 
 	recordOldAddr := func(oldAddr, newAddr addrs.AbsResourceInstance) {
-		if prevMove, exists := ret.Changes.GetOk(oldAddr); exists {
+		oldAddrKey := oldAddr.UniqueKey()
+		newAddrKey := newAddr.UniqueKey()
+		if prevMove, exists := ret.Changes[oldAddrKey]; exists {
 			// If the old address was _already_ the result of a move then
 			// we'll replace that entry so that our results summarize a chain
 			// of moves into a single entry.
-			ret.Changes.Remove(oldAddr)
+			delete(ret.Changes, oldAddrKey)
 			oldAddr = prevMove.From
 		}
-		ret.Changes.Put(newAddr, MoveSuccess{
+		ret.Changes[newAddrKey] = MoveSuccess{
 			From: oldAddr,
 			To:   newAddr,
-		})
+		}
 	}
 	recordBlockage := func(newAddr, wantedAddr addrs.AbsMoveable) {
-		ret.Blocked.Put(newAddr, MoveBlocked{
+		ret.Blocked[newAddr.UniqueKey()] = MoveBlocked{
 			Wanted: wantedAddr,
 			Actual: newAddr,
-		})
+		}
 	}
 
-	for _, v := range g.ReverseTopologicalOrder() {
+	g.ReverseDepthFirstWalk(startNodes, func(v dag.Vertex, depth int) error {
 		stmt := v.(*MoveStatement)
 
 		for _, ms := range state.Modules {
@@ -182,7 +187,9 @@ func ApplyMoves(stmts []MoveStatement, state *states.State) MoveResults {
 				panic(fmt.Sprintf("unhandled move object kind %s", kind))
 			}
 		}
-	}
+
+		return nil
+	})
 
 	return ret
 }
@@ -285,7 +292,7 @@ type MoveResults struct {
 	//
 	// In the return value from ApplyMoves, all of the keys are guaranteed to
 	// be unique keys derived from addrs.AbsResourceInstance values.
-	Changes addrs.Map[addrs.AbsResourceInstance, MoveSuccess]
+	Changes map[addrs.UniqueKey]MoveSuccess
 
 	// Blocked is a map from the unique keys of the final new
 	// resource instances addresses to information about where they "wanted"
@@ -301,14 +308,7 @@ type MoveResults struct {
 	//
 	// In the return value from ApplyMoves, all of the keys are guaranteed to
 	// be unique keys derived from values of addrs.AbsMoveable types.
-	Blocked addrs.Map[addrs.AbsMoveable, MoveBlocked]
-}
-
-func makeMoveResults() MoveResults {
-	return MoveResults{
-		Changes: addrs.MakeMap[addrs.AbsResourceInstance, MoveSuccess](),
-		Blocked: addrs.MakeMap[addrs.AbsMoveable, MoveBlocked](),
-	}
+	Blocked map[addrs.UniqueKey]MoveBlocked
 }
 
 type MoveSuccess struct {
@@ -327,14 +327,15 @@ type MoveBlocked struct {
 // If AddrMoved returns true, you can pass the same address to method OldAddr
 // to find its original address prior to moving.
 func (rs MoveResults) AddrMoved(newAddr addrs.AbsResourceInstance) bool {
-	return rs.Changes.Has(newAddr)
+	_, ok := rs.Changes[newAddr.UniqueKey()]
+	return ok
 }
 
 // OldAddr returns the old address of the given resource instance address, or
 // just returns back the same address if the given instance wasn't affected by
 // any move statements.
 func (rs MoveResults) OldAddr(newAddr addrs.AbsResourceInstance) addrs.AbsResourceInstance {
-	change, ok := rs.Changes.GetOk(newAddr)
+	change, ok := rs.Changes[newAddr.UniqueKey()]
 	if !ok {
 		return newAddr
 	}
